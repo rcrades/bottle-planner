@@ -249,42 +249,51 @@ app.use(express.json());
 // Log serverless information
 logServerlessInfo();
 
-// Try to initialize data on startup (but don't block for serverless)
-// Only run this during development, in serverless it's better to initialize on demand
-if (process.env.NODE_ENV !== 'production') {
+// Root API endpoint - respond immediately regardless of Redis connectivity
+// This is critical for Vercel's health checks and for frontend fallback checks
+app.get("/api", (req, res) => {
+  res.json({ 
+    status: "online",
+    environment: process.env.NODE_ENV || "development",
+    vercel: process.env.VERCEL ? "true" : "false",
+    serverTime: new Date().toISOString(),
+    message: "Baby Bottle Planner API is running"
+  });
+});
+
+// Home/health check endpoint - also respond immediately
+app.get("/", (req, res) => {
+  res.send("Bottle Planner API is running!");
+});
+
+// Try to initialize data on startup only in development
+// Skip in production to avoid cold start delays
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   initDataIfNeeded().catch(err => {
     console.error("⚠️ Warning: Data initialization error:", err);
     console.log("API will continue, but some endpoints may fail if data is missing");
   });
 }
 
-// Home/health check endpoint
-app.get("/", (req, res) => {
-  res.send("Bottle Planner API is running!");
-});
-
-// Root API endpoint
-app.get("/api", (req, res) => {
-  res.json({ 
-    status: "online",
-    environment: process.env.NODE_ENV || "development",
-    message: "Baby Bottle Planner API is running"
-  });
-});
-
-// Redis connection check
+// Redis connection check with better error information for production
 app.get("/api/redis/check-connection", async (req, res) => {
   try {
     const client = await getRedisClient();
     await client.ping();
     res.json({ 
       connected: true,
+      environment: process.env.NODE_ENV || "development", 
+      vercel: process.env.VERCEL ? "true" : "false",
+      serverTime: new Date().toISOString(),
       message: "Successfully connected to Redis database"
     });
   } catch (error) {
     console.error("Redis connection error:", error);
     res.status(500).json({ 
       connected: false, 
+      environment: process.env.NODE_ENV || "development",
+      vercel: process.env.VERCEL ? "true" : "false",
+      serverTime: new Date().toISOString(),
       error: "Failed to connect to Redis",
       message: error instanceof Error ? error.message : "Unknown error"
     });
@@ -424,164 +433,320 @@ app.post("/api/feedings/plan", async (req, res) => {
 
 // Recommendations endpoint with improved error handling
 app.get("/api/recommendations/get", async (req, res) => {
-  // Initialize data on first access (needed for cold starts in serverless)
-  let initAttempted = false;
-  
-  const handleRecommendationsRequest = async (retryCount = 0) => {
-    try {
-      console.log(`Fetching recommendations from Redis... (attempt ${retryCount + 1})`);
+  try {
+    // In production with Vercel, use a more direct approach to reduce overhead
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+      console.log("Production recommendations fetch - using direct approach");
       
-      // Add a timeout to prevent hanging requests
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
-      });
-      
-      // Try to get recommendations with a timeout
-      const client = await getRedisClient();
-      const recommendationsPromise = client.get(REDIS_KEYS.RECOMMENDATIONS);
-      const recommendationsData = await Promise.race([recommendationsPromise, timeoutPromise]);
-      
-      if (!recommendationsData) {
-        // Recommendations are missing but Redis is working - try to initialize data
-        if (!initAttempted) {
-          console.log("Recommendations not found. Attempting data initialization...");
-          await initDataIfNeeded();
-          initAttempted = true;
+      try {
+        // Direct client with minimal overhead in production
+        const client = await getRedisClient();
+        const recommendationsData = await client.get(REDIS_KEYS.RECOMMENDATIONS);
+        
+        if (!recommendationsData) {
+          // Initialize data if missing
+          console.log("Recommendations not found in production. Initializing data...");
           
-          // Retry the recommendations fetch after initialization
+          // Create minimal recommendations only
+          const defaultRecommendations = [
+            {
+              date: "2025-03-24",
+              ageInDays: 5,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
+              dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
+            },
+            {
+              date: "2025-03-25",
+              ageInDays: 6,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
+              dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
+            },
+            {
+              date: "2025-03-26",
+              ageInDays: 7,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
+              dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+            }
+          ];
+          
+          await client.set(REDIS_KEYS.RECOMMENDATIONS, JSON.stringify(defaultRecommendations));
+          console.log("✅ Recommendations created in production");
+          
+          return res.json({ success: true, recommendations: defaultRecommendations });
+        }
+        
+        // Parse recommendations data
+        try {
+          const recommendations = JSON.parse(recommendationsData);
+          console.log(`Successfully fetched ${recommendations.length} recommendations in production`);
+          return res.json({ success: true, recommendations });
+        } catch (parseError) {
+          console.error("Error parsing recommendations data in production:", parseError);
+          res.status(500).json({
+            success: false,
+            message: "Invalid recommendations data format",
+            serverTime: new Date().toISOString(),
+            error: "The recommendations data could not be parsed",
+            env: process.env.NODE_ENV || "production"
+          });
+        }
+      } catch (prodError) {
+        console.error("Production recommendations fetch error:", prodError);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch recommendations in production",
+          serverTime: new Date().toISOString(),
+          error: prodError instanceof Error ? prodError.message : "Unknown error",
+          env: process.env.NODE_ENV || "production"
+        });
+      }
+      return;
+    }
+    
+    // In development, use the more robust approach with retries
+    // Initialize data on first access (needed for cold starts in serverless)
+    let initAttempted = false;
+    
+    const handleRecommendationsRequest = async (retryCount = 0) => {
+      try {
+        console.log(`Fetching recommendations from Redis... (attempt ${retryCount + 1})`);
+        
+        // Add a timeout to prevent hanging requests
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
+        });
+        
+        // Try to get recommendations with a timeout
+        const client = await getRedisClient();
+        const recommendationsPromise = client.get(REDIS_KEYS.RECOMMENDATIONS);
+        const recommendationsData = await Promise.race([recommendationsPromise, timeoutPromise]);
+        
+        if (!recommendationsData) {
+          // Recommendations are missing but Redis is working - try to initialize data
+          if (!initAttempted) {
+            console.log("Recommendations not found. Attempting data initialization...");
+            await initDataIfNeeded();
+            initAttempted = true;
+            
+            // Retry the recommendations fetch after initialization
+            return handleRecommendationsRequest(retryCount + 1);
+          }
+          
+          console.log("No recommendations found in database");
+          res.status(404).json({
+            success: false,
+            message: "No recommendations found in database. Try reloading or reinitializing data."
+          });
+          return;
+        }
+        
+        // Parse recommendations data with proper error handling
+        try {
+          const recommendations = JSON.parse(recommendationsData);
+          console.log(`Successfully fetched ${recommendations.length} recommendations`);
+          res.json({ success: true, recommendations });
+        } catch (parseError) {
+          console.error("Error parsing recommendations data:", parseError);
+          res.status(500).json({
+            success: false,
+            message: "Invalid recommendations data format",
+            error: "The recommendations data could not be parsed"
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching recommendations:", error);
+        
+        // Handle retries for certain error types
+        if (retryCount < 2 && (
+          error.message.includes("timeout") || 
+          error.message.includes("connection") ||
+          error.code === "ECONNRESET" ||
+          error.code === "ETIMEDOUT"
+        )) {
+          console.log(`Retrying recommendations fetch (attempt ${retryCount + 1})...`);
+          // Wait briefly before retrying
+          await new Promise(resolve => setTimeout(resolve, 500));
           return handleRecommendationsRequest(retryCount + 1);
         }
         
-        console.log("No recommendations found in database");
-        res.status(404).json({
-          success: false,
-          message: "No recommendations found in database. Try reloading or reinitializing data."
-        });
-        return;
-      }
-      
-      // Parse recommendations data with proper error handling
-      try {
-        const recommendations = JSON.parse(recommendationsData);
-        console.log(`Successfully fetched ${recommendations.length} recommendations`);
-        res.json({ success: true, recommendations });
-      } catch (parseError) {
-        console.error("Error parsing recommendations data:", parseError);
+        // Always return a valid JSON response, even on severe errors
         res.status(500).json({
           success: false,
-          message: "Invalid recommendations data format",
-          error: "The recommendations data could not be parsed"
+          message: "Failed to fetch recommendations",
+          error: error instanceof Error ? error.message : "Unknown error",
+          retry: "Please refresh the page or try again later"
         });
       }
-    } catch (error) {
-      console.error("Error fetching recommendations:", error);
-      
-      // Handle retries for certain error types
-      if (retryCount < 2 && (
-        error.message.includes("timeout") || 
-        error.message.includes("connection") ||
-        error.code === "ECONNRESET" ||
-        error.code === "ETIMEDOUT"
-      )) {
-        console.log(`Retrying recommendations fetch (attempt ${retryCount + 1})...`);
-        // Wait briefly before retrying
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return handleRecommendationsRequest(retryCount + 1);
-      }
-      
-      // Always return a valid JSON response, even on severe errors
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch recommendations",
-        error: error instanceof Error ? error.message : "Unknown error",
-        retry: "Please refresh the page or try again later"
-      });
-    }
-  };
-  
-  // Start the request handling
-  await handleRecommendationsRequest();
+    };
+    
+    // Start the request handling for development
+    await handleRecommendationsRequest();
+  } catch (outerError) {
+    // Catch any unexpected errors at the top level
+    console.error("Unexpected error in recommendations endpoint:", outerError);
+    res.status(500).json({
+      success: false,
+      message: "An unexpected error occurred in the recommendations endpoint",
+      error: outerError instanceof Error ? outerError.message : "Unknown error",
+      serverTime: new Date().toISOString()
+    });
+  }
 });
 
 // Profile endpoint with improved error handling for serverless environments
 app.get("/api/profile/get", async (req, res) => {
-  // Initialize data on first access (needed for cold starts in serverless)
-  let initAttempted = false;
-  
-  const handleProfileRequest = async (retryCount = 0) => {
-    try {
-      console.log(`Fetching profile from Redis... (attempt ${retryCount + 1})`);
+  try {
+    // In production with Vercel, use a more direct approach to reduce overhead
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+      console.log("Production profile fetch - using direct approach");
       
-      // Add a timeout to prevent hanging requests
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
-      });
-      
-      // Try to get profile with a timeout
-      const client = await getRedisClient();
-      const profilePromise = client.get(REDIS_KEYS.PROFILE);
-      const profileData = await Promise.race([profilePromise, timeoutPromise]);
-      
-      if (!profileData) {
-        // Profile is missing but Redis is working - try to initialize data
-        if (!initAttempted) {
-          console.log("Profile not found. Attempting data initialization...");
-          await initDataIfNeeded();
-          initAttempted = true;
+      try {
+        // Direct client with minimal overhead in production
+        const client = await getRedisClient();
+        const profileData = await client.get(REDIS_KEYS.PROFILE);
+        
+        if (!profileData) {
+          // Initialize data if missing
+          console.log("Profile not found in production. Initializing data...");
           
-          // Retry the profile fetch after initialization
+          // Create minimal profile only
+          const defaultProfile = {
+            birthDate: "2025-03-20T00:00:00.000Z",
+            ageInDays: 7,
+            currentRecommendation: {
+              date: "2025-03-26",
+              ageInDays: 7,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
+              dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+            }
+          };
+          
+          await client.set(REDIS_KEYS.PROFILE, JSON.stringify(defaultProfile));
+          console.log("✅ Profile created in production");
+          
+          return res.json({ success: true, profile: defaultProfile });
+        }
+        
+        // Parse profile data
+        try {
+          const profile = JSON.parse(profileData);
+          console.log("Successfully fetched profile in production");
+          return res.json({ success: true, profile });
+        } catch (parseError) {
+          console.error("Error parsing profile data in production:", parseError);
+          res.status(500).json({
+            success: false,
+            message: "Invalid profile data format",
+            serverTime: new Date().toISOString(),
+            error: "The profile data could not be parsed",
+            env: process.env.NODE_ENV || "production"
+          });
+        }
+      } catch (prodError) {
+        console.error("Production profile fetch error:", prodError);
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch profile in production",
+          serverTime: new Date().toISOString(),
+          error: prodError instanceof Error ? prodError.message : "Unknown error",
+          env: process.env.NODE_ENV || "production"
+        });
+      }
+      return;
+    }
+    
+    // In development, use the more robust approach with retries
+    // Initialize data on first access (needed for cold starts in serverless)
+    let initAttempted = false;
+    
+    const handleProfileRequest = async (retryCount = 0) => {
+      try {
+        console.log(`Fetching profile from Redis... (attempt ${retryCount + 1})`);
+        
+        // Add a timeout to prevent hanging requests
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
+        });
+        
+        // Try to get profile with a timeout
+        const client = await getRedisClient();
+        const profilePromise = client.get(REDIS_KEYS.PROFILE);
+        const profileData = await Promise.race([profilePromise, timeoutPromise]);
+        
+        if (!profileData) {
+          // Profile is missing but Redis is working - try to initialize data
+          if (!initAttempted) {
+            console.log("Profile not found. Attempting data initialization...");
+            await initDataIfNeeded();
+            initAttempted = true;
+            
+            // Retry the profile fetch after initialization
+            return handleProfileRequest(retryCount + 1);
+          }
+          
+          console.log("Profile not found in database");
+          res.status(404).json({
+            success: false,
+            message: "Profile not found in database. Try reloading or reinitializing data."
+          });
+          return;
+        }
+        
+        // Parse profile data with proper error handling
+        try {
+          const profile = JSON.parse(profileData);
+          console.log("Successfully fetched profile");
+          res.json({ success: true, profile });
+        } catch (parseError) {
+          console.error("Error parsing profile data:", parseError);
+          res.status(500).json({
+            success: false,
+            message: "Invalid profile data format",
+            error: "The profile data could not be parsed"
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching profile:", error);
+        
+        // Handle retries for certain error types
+        if (retryCount < 2 && (
+          error.message.includes("timeout") || 
+          error.message.includes("connection") ||
+          error.code === "ECONNRESET" ||
+          error.code === "ETIMEDOUT"
+        )) {
+          console.log(`Retrying profile fetch (attempt ${retryCount + 1})...`);
+          // Wait briefly before retrying
+          await new Promise(resolve => setTimeout(resolve, 500));
           return handleProfileRequest(retryCount + 1);
         }
         
-        console.log("Profile not found in database");
-        res.status(404).json({
-          success: false,
-          message: "Profile not found in database. Try reloading or reinitializing data."
-        });
-        return;
-      }
-      
-      // Parse profile data with proper error handling
-      try {
-        const profile = JSON.parse(profileData);
-        console.log("Successfully fetched profile");
-        res.json({ success: true, profile });
-      } catch (parseError) {
-        console.error("Error parsing profile data:", parseError);
+        // Always return a valid JSON response, even on severe errors
         res.status(500).json({
           success: false,
-          message: "Invalid profile data format",
-          error: "The profile data could not be parsed"
+          message: "Failed to fetch profile",
+          error: error instanceof Error ? error.message : "Unknown error",
+          retry: "Please refresh the page or try again later"
         });
       }
-    } catch (error) {
-      console.error("Error fetching profile:", error);
-      
-      // Handle retries for certain error types
-      if (retryCount < 2 && (
-        error.message.includes("timeout") || 
-        error.message.includes("connection") ||
-        error.code === "ECONNRESET" ||
-        error.code === "ETIMEDOUT"
-      )) {
-        console.log(`Retrying profile fetch (attempt ${retryCount + 1})...`);
-        // Wait briefly before retrying
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return handleProfileRequest(retryCount + 1);
-      }
-      
-      // Always return a valid JSON response, even on severe errors
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch profile",
-        error: error instanceof Error ? error.message : "Unknown error",
-        retry: "Please refresh the page or try again later"
-      });
-    }
-  };
-  
-  // Start the request handling
-  await handleProfileRequest();
+    };
+    
+    // Start the request handling for development
+    await handleProfileRequest();
+  } catch (outerError) {
+    // Catch any unexpected errors at the top level
+    console.error("Unexpected error in profile endpoint:", outerError);
+    res.status(500).json({
+      success: false,
+      message: "An unexpected error occurred in the profile endpoint",
+      error: outerError instanceof Error ? outerError.message : "Unknown error",
+      serverTime: new Date().toISOString()
+    });
+  }
 });
 
 // Get actual feedings endpoint

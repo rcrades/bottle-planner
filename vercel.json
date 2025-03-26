@@ -31,6 +31,6 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "REDIS_URL": "redis://default:AWVjAAIjcDE0NGM3NTE4ODdmZjE0MzE2OTZkODAyYjE5ZmVhNDQyOHAxMA@awake-kid-25955.upstash.io:6379"
+    "REDIS_URL": "rediss://default:AWVjAAIjcDE0NGM3NTE4ODdmZjE0MzE2OTZkODAyYjE5ZmVhNDQyOHAxMA@awake-kid-25955.upstash.io:6379"
   }
 } 
