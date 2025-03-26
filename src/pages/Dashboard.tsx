@@ -139,7 +139,7 @@ export default function Dashboard() {
     }
   }
 
-  const loadRecommendations = async () => {
+  const loadRecommendations = async (retryCount = 0) => {
     setIsLoadingRecommendations(true)
     setRecommendationsError("")
     setHasDataError(false)
@@ -147,23 +147,60 @@ export default function Dashboard() {
     
     // First check that the API server is accessible
     try {
-      const connectionCheck = await fetch("/api/redis/check-connection");
+      const connectionCheck = await fetch("/api/redis/check-connection", {
+        headers: {
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache",
+        }
+      });
+      
       if (!connectionCheck.ok) {
         const errorText = await connectionCheck.text();
         console.error("API connection check failed:", connectionCheck.status, errorText);
-        setErrorMessages({
-          title: "API Connection Error",
-          description: "Cannot connect to the API server. Please make sure it's running.",
-          command: "sh dev-setup.sh",
-          additionalInstructions: "This command will restart both the API and frontend servers."
-        });
-        setHasDataError(true);
-        setIsLoadingRecommendations(false);
-        return;
+        
+        // For production deployment - try API root as fallback
+        if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+          try {
+            const rootApiCheck = await fetch("/api", {
+              headers: {
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+              }
+            });
+            
+            if (rootApiCheck.ok) {
+              console.log("API root accessible, but Redis check failed. Proceeding with caution.");
+              // Continue with load attempt despite Redis check failing
+            } else {
+              setErrorMessages({
+                title: "API Connection Error",
+                description: "Cannot connect to the API server in production. The server may be temporarily unavailable.",
+                command: "npx tsx src/scripts/init-all.ts",
+                additionalInstructions: "Copy to clipboard"
+              });
+              setHasDataError(true);
+              setIsLoadingRecommendations(false);
+              return;
+            }
+          } catch (rootApiError) {
+            console.error("Root API check also failed:", rootApiError);
+          }
+        } else {
+          // Development environment
+          setErrorMessages({
+            title: "API Connection Error",
+            description: "Cannot connect to the API server. Please make sure it's running.",
+            command: "sh dev-setup.sh",
+            additionalInstructions: "This command will restart both the API and frontend servers."
+          });
+          setHasDataError(true);
+          setIsLoadingRecommendations(false);
+          return;
+        }
       }
       
-      // Connection successful, continue with profile fetch
-      const connectionData = await connectionCheck.json();
+      // Connection successful if we reach here
+      const connectionData = await connectionCheck.json().catch(() => ({ connected: false }));
       if (!connectionData.connected) {
         console.error("Redis connection check returned not connected:", connectionData);
         setErrorMessages({
@@ -180,15 +217,22 @@ export default function Dashboard() {
       console.log("API and Redis connection successful, proceeding with data loading");
     } catch (connectionError) {
       console.error("Error during API connection check:", connectionError);
-      setErrorMessages({
-        title: "API Connection Error",
-        description: connectionError instanceof Error ? connectionError.message : "Cannot reach the API server",
-        command: "sh dev-setup.sh",
-        additionalInstructions: "This command will restart both the API and frontend servers."
-      });
-      setHasDataError(true);
-      setIsLoadingRecommendations(false);
-      return;
+      
+      // In production, try to continue anyway
+      if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+        console.log("Production environment: attempting to proceed despite connection check failure");
+        // Continue with data loading despite connection check failure
+      } else {
+        setErrorMessages({
+          title: "API Connection Error",
+          description: connectionError instanceof Error ? connectionError.message : "Cannot reach the API server",
+          command: "sh dev-setup.sh",
+          additionalInstructions: "This command will restart both the API and frontend servers."
+        });
+        setHasDataError(true);
+        setIsLoadingRecommendations(false);
+        return;
+      }
     }
     
     try {
@@ -212,7 +256,38 @@ export default function Dashboard() {
         if (!profileResponse.ok) {
           const errorText = await profileResponse.text();
           console.error("Profile fetch returned error status:", profileResponse.status, errorText);
-          throw new Error(`Server returned ${profileResponse.status}: ${errorText.substring(0, 100)}`);
+          
+          // Check if we should retry
+          if (retryCount < 2 && profileResponse.status >= 500) {
+            console.log(`Retrying profile fetch (attempt ${retryCount + 1})...`);
+            setIsLoadingRecommendations(false);
+            // Wait a moment before retrying
+            setTimeout(() => loadRecommendations(retryCount + 1), 1500);
+            return;
+          }
+          
+          // On production, display a more user-friendly error
+          if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+            setErrorMessages({
+              title: "API Connection Error",
+              description: "The application could not connect to the API server: " + 
+                           (errorText.includes("FUNCTION_INVOCATION_FAILED") ? 
+                            "API returned status 500: A server error has occurred" : errorText.substring(0, 100)),
+              command: "npx tsx src/scripts/init-all.ts",
+              additionalInstructions: "Copy to clipboard\nIf the issue persists after running this command, try stopping and restarting the development servers with 'sh dev-setup.sh'."
+            });
+          } else {
+            setErrorMessages({
+              title: "API Connection Error",
+              description: `Server returned ${profileResponse.status}: ${errorText.substring(0, 100)}`,
+              command: "npx tsx src/scripts/init-all.ts",
+              additionalInstructions: "If the issue persists after running this command, try stopping and restarting the development servers with 'sh dev-setup.sh'."
+            });
+          }
+          
+          setHasDataError(true);
+          setIsLoadingRecommendations(false);
+          return;
         }
         
         const responseText = await profileResponse.text()
@@ -230,10 +305,10 @@ export default function Dashboard() {
           if (responseText.includes("FUNCTION_INVOCATION_FAILED")) {
             setHasDataError(true)
             setErrorMessages({
-              title: "Server Function Error",
-              description: "The server function failed to execute properly. This is likely due to a Redis connection issue.",
+              title: "API Connection Error",
+              description: "The application could not connect to the API server: API returned status 500: A server error has occurred FUNCTION_INVOCATION_FAILED",
               command: "npx tsx src/scripts/init-all.ts",
-              additionalInstructions: "After running this command in your terminal, refresh this page."
+              additionalInstructions: "Copy to clipboard\nIf the issue persists after running this command, try stopping and restarting the development servers with 'sh dev-setup.sh'."
             });
             throw new Error(`Redis connection error or serverless function timeout. Please try reinitializing the data.`)
           }

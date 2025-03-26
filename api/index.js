@@ -2,6 +2,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+
+// Import Redis client with improved error handling
 const { getRedisClient } = require('../src/server/api/redis-client');
 const { getSettings, saveSettings } = require('../src/server/api/settings');
 const { getAllRecommendations } = require('../src/server/api/recommendations');
@@ -21,208 +23,253 @@ const REDIS_KEYS = {
 };
 
 /**
+ * Adds logging information for Vercel serverless environment
+ */
+function logServerlessInfo() {
+  // Add additional context for serverless debugging
+  if (process.env.VERCEL) {
+    console.log('Running in Vercel serverless environment');
+    console.log(`Region: ${process.env.VERCEL_REGION || 'unknown'}`);
+    console.log(`Node version: ${process.version}`);
+    console.log(`Memory limit: ${process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || 'unknown'} MB`);
+  }
+}
+
+/**
  * Initializes Redis with required data if it doesn't exist
  * Returns true if successful, false otherwise
+ * Optimized for serverless with timeout handling
  */
 const initDataIfNeeded = async () => {
   console.log("Checking if Redis data needs initialization...");
   
+  // Add a timeout to prevent blocking in serverless
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("Data initialization timed out")), 5000);
+  });
+  
   try {
-    const client = await getRedisClient();
-    let dataInitialized = true;
-    
-    // Check if profile exists, if not create it
-    const existingProfile = await client.get(REDIS_KEYS.PROFILE);
-    if (!existingProfile) {
-      console.log("Creating initial profile data...");
-      const defaultProfile = {
-        birthDate: "2025-03-20T00:00:00.000Z",
-        ageInDays: 7,
-        currentRecommendation: {
-          date: "2025-03-26",
+    const initPromise = (async () => {
+      const client = await getRedisClient();
+      let dataInitialized = true;
+      
+      // Check if profile exists, if not create it
+      const existingProfile = await client.get(REDIS_KEYS.PROFILE);
+      if (!existingProfile) {
+        console.log("Creating initial profile data...");
+        const defaultProfile = {
+          birthDate: "2025-03-20T00:00:00.000Z",
           ageInDays: 7,
-          feedingFrequency: { minHours: 2, maxHours: 3 },
-          amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
-          dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+          currentRecommendation: {
+            date: "2025-03-26",
+            ageInDays: 7,
+            feedingFrequency: { minHours: 2, maxHours: 3 },
+            amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
+            dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+          }
+        };
+        await client.set(REDIS_KEYS.PROFILE, JSON.stringify(defaultProfile));
+        dataInitialized = false;
+        console.log("✅ Profile data initialized");
+      }
+      
+      // Check if recommendations exist, if not create them
+      // (only check if we haven't already initialized something to save time in serverless)
+      if (dataInitialized) {
+        const existingRecommendations = await client.get(REDIS_KEYS.RECOMMENDATIONS);
+        if (!existingRecommendations) {
+          console.log("Creating initial recommendations data...");
+          const defaultRecommendations = [
+            {
+              date: "2025-03-24",
+              ageInDays: 5,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
+              dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
+            },
+            {
+              date: "2025-03-25",
+              ageInDays: 6,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
+              dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
+            },
+            {
+              date: "2025-03-26",
+              ageInDays: 7,
+              feedingFrequency: { minHours: 2, maxHours: 3 },
+              amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
+              dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+            }
+          ];
+          await client.set(REDIS_KEYS.RECOMMENDATIONS, JSON.stringify(defaultRecommendations));
+          dataInitialized = false;
+          console.log("✅ Recommendations data initialized");
         }
-      };
-      await client.set(REDIS_KEYS.PROFILE, JSON.stringify(defaultProfile));
-      dataInitialized = false;
-      console.log("✅ Profile data initialized");
-    }
-    
-    // Check if recommendations exist, if not create them
-    const existingRecommendations = await client.get(REDIS_KEYS.RECOMMENDATIONS);
-    if (!existingRecommendations) {
-      console.log("Creating initial recommendations data...");
-      const defaultRecommendations = [
-        {
-          date: "2025-03-24",
-          ageInDays: 5,
-          feedingFrequency: { minHours: 2, maxHours: 3 },
-          amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
-          dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
-        },
-        {
-          date: "2025-03-25",
-          ageInDays: 6,
-          feedingFrequency: { minHours: 2, maxHours: 3 },
-          amountPerFeeding: { minOz: 1.5, maxOz: 2, minMl: 45, maxMl: 60 },
-          dailyIntake: { minOz: 16, maxOz: 20, minMl: 480, maxMl: 600 }
-        },
-        {
-          date: "2025-03-26",
-          ageInDays: 7,
-          feedingFrequency: { minHours: 2, maxHours: 3 },
-          amountPerFeeding: { minOz: 2, maxOz: 2, minMl: 60, maxMl: 60 },
-          dailyIntake: { minOz: 18, maxOz: 20, minMl: 540, maxMl: 600 }
+      }
+      
+      // Check if settings exist, if not create them
+      // (only check if we haven't already initialized something to save time in serverless)
+      if (dataInitialized) {
+        const existingSettings = await client.get(REDIS_KEYS.SETTINGS);
+        if (!existingSettings) {
+          console.log("Creating initial settings data...");
+          const defaultSettings = {
+            feedWindows: {
+              min: 2,
+              max: 3,
+              ideal: 2.5,
+            },
+            feedAmounts: {
+              min: 1.5,
+              max: 2.5,
+              target: 2,
+            },
+            useMetric: false,
+            lockedFeedings: {
+              enabled: true,
+              times: ["22:00", "00:30", "03:00", "05:30", "08:00"],
+            }
+          };
+          await client.set(REDIS_KEYS.SETTINGS, JSON.stringify(defaultSettings));
+          dataInitialized = false;
+          console.log("✅ Settings data initialized");
         }
-      ];
-      await client.set(REDIS_KEYS.RECOMMENDATIONS, JSON.stringify(defaultRecommendations));
-      dataInitialized = false;
-      console.log("✅ Recommendations data initialized");
-    }
-    
-    // Check if settings exist, if not create them
-    const existingSettings = await client.get(REDIS_KEYS.SETTINGS);
-    if (!existingSettings) {
-      console.log("Creating initial settings data...");
-      const defaultSettings = {
-        feedWindows: {
-          min: 2,
-          max: 3,
-          ideal: 2.5,
-        },
-        feedAmounts: {
-          min: 1.5,
-          max: 2.5,
-          target: 2,
-        },
-        useMetric: false,
-        lockedFeedings: {
-          enabled: true,
-          times: ["22:00", "00:30", "03:00", "05:30", "08:00"],
+      }
+      
+      // Only check for feedings if nothing else needed initializing (to save time in serverless)
+      if (dataInitialized) {
+        // Check if planned feedings exist, if not create initial feeding plan
+        const existingPlannedFeedings = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
+        if (!existingPlannedFeedings) {
+          console.log("Creating initial planned feedings data...");
+          const defaultFeedings = [
+            {
+              id: "feed-1",
+              time: "08:00",
+              amount: 2,
+              isLocked: true,
+              isCompleted: false
+            },
+            {
+              id: "feed-2",
+              time: "10:30",
+              amount: 2,
+              isLocked: false,
+              isCompleted: false
+            },
+            {
+              id: "feed-3",
+              time: "13:00",
+              amount: 2,
+              isLocked: false,
+              isCompleted: false
+            },
+            {
+              id: "feed-4",
+              time: "15:30",
+              amount: 2,
+              isLocked: false,
+              isCompleted: false
+            },
+            {
+              id: "feed-5",
+              time: "18:00",
+              amount: 2,
+              isLocked: false,
+              isCompleted: false
+            }
+          ];
+          await client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(defaultFeedings));
+          dataInitialized = false;
+          console.log("✅ Planned feedings data initialized");
         }
-      };
-      await client.set(REDIS_KEYS.SETTINGS, JSON.stringify(defaultSettings));
-      dataInitialized = false;
-      console.log("✅ Settings data initialized");
-    }
-    
-    // Check if planned feedings exist, if not create initial feeding plan
-    const existingPlannedFeedings = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
-    if (!existingPlannedFeedings) {
-      console.log("Creating initial planned feedings data...");
-      const defaultFeedings = [
-        {
-          id: "feed-1",
-          time: "08:00",
-          amount: 2,
-          isLocked: true,
-          isCompleted: false
-        },
-        {
-          id: "feed-2",
-          time: "10:30",
-          amount: 2,
-          isLocked: false,
-          isCompleted: false
-        },
-        {
-          id: "feed-3",
-          time: "13:00",
-          amount: 2,
-          isLocked: false,
-          isCompleted: false
-        },
-        {
-          id: "feed-4",
-          time: "15:30",
-          amount: 2,
-          isLocked: false,
-          isCompleted: false
-        },
-        {
-          id: "feed-5",
-          time: "18:00",
-          amount: 2,
-          isLocked: false,
-          isCompleted: false
+      }
+      
+      // Only check actual feedings as the last step (least critical)
+      if (dataInitialized) {
+        const existingActualFeedings = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+        if (!existingActualFeedings) {
+          console.log("Creating initial actual feedings data...");
+          const initialActualFeedings = [
+            {
+              id: "actual-1",
+              date: "2025-03-24",
+              planTime: "08:00",
+              actualTime: "08:15",
+              Amount: 1.8,
+              notes: "Baby seemed hungry but didn't finish bottle"
+            },
+            {
+              id: "actual-2",
+              date: "2025-03-24",
+              planTime: "11:00",
+              actualTime: "11:00",
+              Amount: 2.2,
+              notes: "Finished entire bottle quickly"
+            }
+          ];
+          await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(initialActualFeedings));
+          dataInitialized = false;
+          console.log("✅ Actual feedings data initialized");
         }
-      ];
-      await client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(defaultFeedings));
-      dataInitialized = false;
-      console.log("✅ Planned feedings data initialized");
-    }
+      }
+      
+      if (dataInitialized) {
+        console.log("✅ All Redis data is already initialized");
+      } else {
+        console.log("✅ Successfully initialized missing Redis data");
+      }
+      
+      return true;
+    })();
     
-    // Check if actual feedings exist, if not create them
-    const existingActualFeedings = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
-    if (!existingActualFeedings) {
-      console.log("Creating initial actual feedings data...");
-      const initialActualFeedings = [
-        {
-          id: "actual-1",
-          date: "2025-03-24",
-          time: "08:15",
-          amount: 1.8,
-          notes: "Baby seemed hungry but didn't finish bottle"
-        },
-        {
-          id: "actual-2",
-          date: "2025-03-24",
-          time: "11:00",
-          amount: 2.2,
-          notes: "Finished entire bottle quickly"
-        },
-        {
-          id: "actual-3",
-          date: "2025-03-24",
-          time: "14:30",
-          amount: 2.0,
-          notes: ""
-        },
-        {
-          id: "actual-4",
-          date: "2025-03-25",
-          time: "09:00",
-          amount: 2.1,
-          notes: "Seemed very hungry"
-        },
-        {
-          id: "actual-5",
-          date: "2025-03-25",
-          time: "13:15",
-          amount: 1.5,
-          notes: "Was distracted during feeding"
-        }
-      ];
-      await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(initialActualFeedings));
-      dataInitialized = false;
-      console.log("✅ Actual feedings data initialized");
-    }
-    
-    if (dataInitialized) {
-      console.log("✅ All Redis data is already initialized");
-    } else {
-      console.log("✅ Successfully initialized missing Redis data");
-    }
-    
-    return true;
+    // Race the initialization against the timeout
+    const result = await Promise.race([initPromise, timeoutPromise]);
+    return result;
   } catch (error) {
     console.error("❌ Error initializing data:", error);
+    if (error.message === "Data initialization timed out") {
+      console.log("Initialization will be attempted on first endpoint access");
+    }
     return false;
   }
 };
 
 // Create and configure Express app
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*', // In production, you might want to be more specific
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(express.json());
 
+// Log serverless information
+logServerlessInfo();
+
 // Try to initialize data on startup (but don't block for serverless)
-initDataIfNeeded().catch(err => {
-  console.error("⚠️ Warning: Data initialization error:", err);
-  console.log("API will continue, but some endpoints may fail if data is missing");
+// Only run this during development, in serverless it's better to initialize on demand
+if (process.env.NODE_ENV !== 'production') {
+  initDataIfNeeded().catch(err => {
+    console.error("⚠️ Warning: Data initialization error:", err);
+    console.log("API will continue, but some endpoints may fail if data is missing");
+  });
+}
+
+// Home/health check endpoint
+app.get("/", (req, res) => {
+  res.send("Bottle Planner API is running!");
+});
+
+// Root API endpoint
+app.get("/api", (req, res) => {
+  res.json({ 
+    status: "online",
+    environment: process.env.NODE_ENV || "development",
+    message: "Baby Bottle Planner API is running"
+  });
 });
 
 // Redis connection check
@@ -377,77 +424,164 @@ app.post("/api/feedings/plan", async (req, res) => {
 
 // Recommendations endpoint with improved error handling
 app.get("/api/recommendations/get", async (req, res) => {
-  try {
-    console.log("Fetching recommendations from Redis...");
-    
-    // Add a timeout to prevent hanging requests
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Redis operation timed out")), 5000);
-    });
-    
-    // Try to get recommendations with a timeout
-    const recommendationsPromise = getAllRecommendations();
-    const recommendations = await Promise.race([recommendationsPromise, timeoutPromise]);
-    
-    // Check if we got data
-    if (!recommendations || recommendations.length === 0) {
-      console.log("No recommendations found in database");
-      res.status(404).json({
-        success: false,
-        message: "No recommendations found in database"
+  // Initialize data on first access (needed for cold starts in serverless)
+  let initAttempted = false;
+  
+  const handleRecommendationsRequest = async (retryCount = 0) => {
+    try {
+      console.log(`Fetching recommendations from Redis... (attempt ${retryCount + 1})`);
+      
+      // Add a timeout to prevent hanging requests
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
       });
-      return;
+      
+      // Try to get recommendations with a timeout
+      const client = await getRedisClient();
+      const recommendationsPromise = client.get(REDIS_KEYS.RECOMMENDATIONS);
+      const recommendationsData = await Promise.race([recommendationsPromise, timeoutPromise]);
+      
+      if (!recommendationsData) {
+        // Recommendations are missing but Redis is working - try to initialize data
+        if (!initAttempted) {
+          console.log("Recommendations not found. Attempting data initialization...");
+          await initDataIfNeeded();
+          initAttempted = true;
+          
+          // Retry the recommendations fetch after initialization
+          return handleRecommendationsRequest(retryCount + 1);
+        }
+        
+        console.log("No recommendations found in database");
+        res.status(404).json({
+          success: false,
+          message: "No recommendations found in database. Try reloading or reinitializing data."
+        });
+        return;
+      }
+      
+      // Parse recommendations data with proper error handling
+      try {
+        const recommendations = JSON.parse(recommendationsData);
+        console.log(`Successfully fetched ${recommendations.length} recommendations`);
+        res.json({ success: true, recommendations });
+      } catch (parseError) {
+        console.error("Error parsing recommendations data:", parseError);
+        res.status(500).json({
+          success: false,
+          message: "Invalid recommendations data format",
+          error: "The recommendations data could not be parsed"
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching recommendations:", error);
+      
+      // Handle retries for certain error types
+      if (retryCount < 2 && (
+        error.message.includes("timeout") || 
+        error.message.includes("connection") ||
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT"
+      )) {
+        console.log(`Retrying recommendations fetch (attempt ${retryCount + 1})...`);
+        // Wait briefly before retrying
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return handleRecommendationsRequest(retryCount + 1);
+      }
+      
+      // Always return a valid JSON response, even on severe errors
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch recommendations",
+        error: error instanceof Error ? error.message : "Unknown error",
+        retry: "Please refresh the page or try again later"
+      });
     }
-    
-    console.log("Successfully fetched recommendations");
-    res.json({ success: true, recommendations });
-  } catch (error) {
-    console.error("Error fetching recommendations:", error);
-    
-    // Always return a valid JSON response, even on severe errors
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch recommendations",
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
-  }
+  };
+  
+  // Start the request handling
+  await handleRecommendationsRequest();
 });
 
-// Profile endpoint with improved error handling
+// Profile endpoint with improved error handling for serverless environments
 app.get("/api/profile/get", async (req, res) => {
-  try {
-    console.log("Fetching profile from Redis...");
-    
-    // Add a timeout to prevent hanging requests
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Redis operation timed out")), 5000);
-    });
-    
-    // Try to get profile with a timeout
-    const profilePromise = getProfile();
-    const profile = await Promise.race([profilePromise, timeoutPromise]);
-    
-    if (!profile) {
-      console.log("Profile not found in database");
-      res.status(404).json({
-        success: false,
-        message: "Profile not found in database"
+  // Initialize data on first access (needed for cold starts in serverless)
+  let initAttempted = false;
+  
+  const handleProfileRequest = async (retryCount = 0) => {
+    try {
+      console.log(`Fetching profile from Redis... (attempt ${retryCount + 1})`);
+      
+      // Add a timeout to prevent hanging requests
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Redis operation timed out")), 3000);
       });
-      return;
+      
+      // Try to get profile with a timeout
+      const client = await getRedisClient();
+      const profilePromise = client.get(REDIS_KEYS.PROFILE);
+      const profileData = await Promise.race([profilePromise, timeoutPromise]);
+      
+      if (!profileData) {
+        // Profile is missing but Redis is working - try to initialize data
+        if (!initAttempted) {
+          console.log("Profile not found. Attempting data initialization...");
+          await initDataIfNeeded();
+          initAttempted = true;
+          
+          // Retry the profile fetch after initialization
+          return handleProfileRequest(retryCount + 1);
+        }
+        
+        console.log("Profile not found in database");
+        res.status(404).json({
+          success: false,
+          message: "Profile not found in database. Try reloading or reinitializing data."
+        });
+        return;
+      }
+      
+      // Parse profile data with proper error handling
+      try {
+        const profile = JSON.parse(profileData);
+        console.log("Successfully fetched profile");
+        res.json({ success: true, profile });
+      } catch (parseError) {
+        console.error("Error parsing profile data:", parseError);
+        res.status(500).json({
+          success: false,
+          message: "Invalid profile data format",
+          error: "The profile data could not be parsed"
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      
+      // Handle retries for certain error types
+      if (retryCount < 2 && (
+        error.message.includes("timeout") || 
+        error.message.includes("connection") ||
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT"
+      )) {
+        console.log(`Retrying profile fetch (attempt ${retryCount + 1})...`);
+        // Wait briefly before retrying
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return handleProfileRequest(retryCount + 1);
+      }
+      
+      // Always return a valid JSON response, even on severe errors
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch profile",
+        error: error instanceof Error ? error.message : "Unknown error",
+        retry: "Please refresh the page or try again later"
+      });
     }
-    
-    console.log("Successfully fetched profile");
-    res.json({ success: true, profile });
-  } catch (error) {
-    console.error("Error fetching profile:", error);
-    
-    // Always return a valid JSON response, even on severe errors
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch profile",
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
-  }
+  };
+  
+  // Start the request handling
+  await handleProfileRequest();
 });
 
 // Get actual feedings endpoint
