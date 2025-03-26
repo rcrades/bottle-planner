@@ -1,131 +1,157 @@
 # Baby Bottle Planner
 
-A React application to help parents plan and track baby feeding schedules.
+A simple web application to help parents track and plan baby bottle feedings based on age-appropriate recommendations.
 
 ## Features
 
-### Currently Working
-- **Feeding Recommendations**: Age-based feeding recommendations are loaded from Redis and displayed in the Recommendations tab.
-- **Settings Display**: View current feeding settings (windows, amounts, and locked feedings).
-- **Redis Connection**: API endpoints for Redis connection checks and data retrieval.
+- 📱 Track and manage baby feeding schedules
+- 📊 View feeding recommendations based on baby's age
+- 🤖 AI-powered feeding plan generation
+- ⏰ Schedule locked feedings at specific times
+- ✅ Mark feedings as completed
+- ⚙️ Customize settings for your baby's needs
 
-### Working but Need Testing
-- **Settings Override**: The ability to modify feeding settings is implemented but currently disabled via UI to ensure pediatrician-recommended settings are used.
-- **Profile Information**: Baby profile data (age, birth date) is retrieved but needs validation testing.
-- **AI-Powered Feeding Planner**: The "Plan Next 10 Feeds" functionality uses OpenAI to generate an intelligent feeding schedule. Falls back to rule-based scheduling if OpenAI API fails.
+## Technology Stack
 
-### Planned Future Features
-- **Feeding Schedule Management**: Marking feedings as completed/incomplete and viewing feeding history.
-- **Tracking Analytics**: Visual charts and statistics for feeding patterns and growth tracking.
-- **Multi-Baby Support**: Ability to manage feeding schedules for multiple children.
-- **Mobile Application**: Native mobile app version with push notifications for upcoming feedings.
+- **Frontend**: React with Vite, TailwindCSS, Shadcn UI components
+- **Backend**: Express.js API for development, Vercel serverless functions for production
+- **Database**: Upstash Redis for data storage
+- **AI**: OpenAI GPT-4o for generating feeding plans
 
-## Architecture
+## Prerequisites
 
-The application uses:
-- Frontend: React with shadcn/ui components
-- Backend: Express server for API endpoints
-- Database: Redis for data storage
-- AI: OpenAI integration for smart feeding planning
+- [Node.js](https://nodejs.org/) v16 or higher
+- [PNPM](https://pnpm.io/) package manager
+- [Redis](https://redis.io/) database (Upstash Redis is used by default)
 
-## Environment Setup
+## Setup Instructions
 
-This project requires the following environment variables:
-
-```
-# OpenAI API Key for AI-powered feeding planning
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-To set up:
-1. Create a `.env` file in the project root
-2. Add your OpenAI API key
-3. This file is gitignored for security
-
-## UI Components
-
-This project uses [shadcn/ui](https://ui.shadcn.com/) components, which are built on top of Radix UI and Tailwind CSS.
-
-### Adding UI Components
-
-Before creating any new UI components:
-
-1. **Check shadcn/ui First**
-   - Visit [shadcn/ui components](https://ui.shadcn.com/docs/components)
-   - Use the CLI to add components:
-     ```bash
-     npx shadcn-ui@latest add [component-name]
-     ```
-   - Example: `npx shadcn-ui@latest add skeleton`
-
-2. **Component Location**
-   - All shadcn/ui components are installed in `src/components/ui/`
-   - Custom components that use these UI components go in `src/components/`
-
-3. **Component Dependencies**
-   - Some components have dependencies on others (like `cn` utility)
-   - The CLI will automatically install all required dependencies
-
-### Currently Installed Components
-
-We have the following shadcn/ui components installed:
-
-- `Alert`
-- `Button`
-- `Card`
-- `Label`
-- `Skeleton`
-- `Switch`
-- `Table`
-- `Tabs`
-- `Toast`
-
-### Best Practices
-
-1. **Always Check shadcn/ui First**
-   - Before creating a new UI component, check if it exists in shadcn/ui
-   - This ensures consistency and reduces duplicate code
-
-2. **Use Consistent Imports**
-   - Import from `@/components/ui` or relative paths
-   - Example: `import { Button } from "@/components/ui/button"`
-
-3. **Maintain Component Documentation**
-   - When adding new shadcn/ui components, update this README
-   - Document any custom variants or modifications
-
-## Development
-
-### Prerequisites
-
-- Node.js 18+
-- pnpm (We use pnpm as our package manager)
-
-### Setup
-
-1. Install pnpm if you haven't already:
-   ```bash
-   npm install -g pnpm
-   ```
-
-2. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-
-3. Run development server:
-   ```bash
-   pnpm dev
-   ```
-
-### Adding New UI Components
+### 1. Clone the Repository
 
 ```bash
-# Check available components
-pnpm dlx shadcn@latest add
+git clone https://github.com/yourusername/bottle-planner.git
+cd bottle-planner
+```
 
-# Install specific component
-pnpm dlx shadcn@latest add [component-name]
+### 2. Install Dependencies
 
-# Update README.md with new component
-``` 
+```bash
+# Install PNPM if you don't have it
+npm install -g pnpm
+
+# Install project dependencies
+pnpm install
+```
+
+### 3. Set Up Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```
+# OpenAI API Key - Get this from https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_key_here
+
+# Redis connection URL - Get this from Upstash or your Redis provider
+REDIS_URL=your_redis_url_here
+```
+
+### 4. Initialize Redis Data
+
+Run the initialization script to set up the required data in Redis:
+
+```bash
+npx tsx src/scripts/init-all.ts
+```
+
+This will create the initial profiles, feeding recommendations, and settings in Redis.
+
+### 5. Start the Development Server
+
+Run the development setup script which will:
+- Kill any existing processes on ports 3000 and 5173
+- Initialize Redis data if needed
+- Start the Express API server on port 3000
+- Start the Vite frontend on port 5173
+
+```bash
+# Use the development setup script
+sh dev-setup.sh
+
+# OR start the servers manually
+pnpm run dev:server  # Start the API server
+pnpm run dev         # Start the Vite dev server in a separate terminal
+```
+
+### 6. Access the Application
+
+- 📱 Frontend: [http://localhost:5173](http://localhost:5173)
+- 🔌 API: [http://localhost:3000](http://localhost:3000)
+
+## Deployment to Vercel
+
+This application is designed to be deployed on Vercel with the following configuration:
+
+1. Create a new Vercel project and connect your GitHub repository
+
+2. Set the following environment variables in your Vercel project:
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `REDIS_URL`: Your Upstash Redis connection URL
+
+3. Use the following build settings:
+   - Build Command: `pnpm run build`
+   - Output Directory: `dist`
+
+4. Deploy the application
+
+The `vercel.json` file in the repository configures the serverless functions correctly.
+
+## Project Structure
+
+```
+bottle-planner/
+├── api/                  # Vercel API serverless functions
+├── app/                  # Next.js-compatible components
+├── components/           # UI components
+├── dist/                 # Build output
+├── hooks/                # React hooks
+├── lib/                  # Utility libraries
+├── public/               # Static assets
+├── src/
+│   ├── components/       # React components
+│   ├── hooks/            # Custom React hooks
+│   ├── lib/              # Utility functions
+│   ├── pages/            # Main application pages
+│   ├── scripts/          # Initialization scripts
+│   ├── server/           # Express server and API routes
+│   └── types/            # TypeScript type definitions
+└── styles/               # Global styles
+```
+
+## Development Workflow
+
+1. Make changes to the code
+2. Test locally using `sh dev-setup.sh`
+3. Commit and push your changes
+4. Deploy to Vercel automatically via GitHub integration
+
+## Troubleshooting
+
+### Redis Connection Issues
+
+If you have trouble connecting to Redis:
+
+1. Verify your `REDIS_URL` in the `.env` file
+2. Run `npx tsx src/scripts/init-all.ts` to check the connection
+3. Check if your IP is allowed in Upstash Redis access controls
+
+### API Errors
+
+If the API returns errors:
+
+1. Check if the Express server is running (`pnpm run dev:server`)
+2. Verify Redis connection and data initialization
+3. Check the server logs for more details
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

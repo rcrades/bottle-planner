@@ -1,6 +1,6 @@
 {
   "buildCommand": "pnpm run build",
-  "devCommand": "pnpm run dev",
+  "devCommand": "pnpm run dev:all",
   "installCommand": "pnpm install",
   "framework": "vite",
   "rewrites": [
@@ -9,7 +9,20 @@
   "functions": {
     "api/index.js": {
       "memory": 1024,
-      "maxDuration": 10
+      "maxDuration": 30
     }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" },
+        { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+      ]
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "REDIS_URL": "redis://default:AWVjAAIjcDE0NGM3NTE4ODdmZjE0MzE2OTZkODAyYjE5ZmVhNDQyOHAxMA@awake-kid-25955.upstash.io:6379"
   }
 } 

@@ -1,49 +1,216 @@
-# API Setup in Bottle Planner
+# API Setup for Baby Bottle Planner
 
-This document explains how APIs are set up in the Bottle Planner application. We have two distinct environments:
+This guide explains how the API works in the Baby Bottle Planner application and provides solutions to common issues, including the "Profile fetch failed" error.
 
-## Local Development
+## API Architecture
 
-In development, we use:
-1. A Vite development server for the frontend
-2. An Express server (running on port 5000) for API endpoints
-3. A proxy in the Vite config that forwards API requests to the Express server
+The Baby Bottle Planner uses a dual API setup:
 
-### How to Run Locally
+### Development Environment
+- **Frontend**: Vite server (port 5173)
+- **Backend**: Express server (port 3000)
+- **Data Storage**: Upstash Redis
 
-```bash
-# Start both frontend and backend servers together
-pnpm run dev:all
+### Production Environment (Vercel)
+- **Frontend**: Static files built by Vite
+- **Backend**: Vercel serverless functions
+- **Data Storage**: Same Upstash Redis instance
 
-# Or start them separately
-pnpm run dev        # Frontend only (Vite)
-pnpm run dev:server # Backend only (Express)
+## Setting Up the API
+
+### 1. Environment Variables
+
+Create a `.env` file in the project root with:
+
+```
+# Redis connection URL from Upstash dashboard
+REDIS_URL=redis://default:your_password_here@your_upstash_endpoint:6379
+
+# OpenAI API key for feeding planning
+OPENAI_API_KEY=your_openai_key_here
 ```
 
-## Production (Vercel)
+### 2. Initialize Redis Data
 
-In production, we use:
-1. Vite-built static assets for the frontend
-2. Vercel serverless functions for API endpoints
-3. A rewrite in `vercel.json` that routes API requests to the serverless function
+Before using the API, you must initialize the Redis database:
 
-### How It Works
+```bash
+# Run the initialization script
+npx tsx src/scripts/init-all.ts
+```
 
-1. The `api/index.js` file contains the Express server code
-2. `vercel.json` specifies the routing and server configuration
-3. Environment variables like `OPENAI_API_KEY` and `REDIS_URL` need to be set in Vercel
+This script creates:
+- Baby profile data
+- Feeding recommendations
+- Default settings
+- Initial feeding plan
 
-## Fixing Common Issues
+### 3. Start the Development Servers
 
-### Local "Invalid JSON" Errors
+Use the setup script to start both servers:
 
-If you see "Unexpected token '<', "<!DOCTYPE "... is not valid JSON" in development:
-1. Make sure the Express server is running (`pnpm run dev:server`)
-2. Check that the Vite proxy is configured correctly in `vite.config.ts`
+```bash
+# Start both frontend and API servers
+sh dev-setup.sh
+```
 
-### Production "Invalid JSON" Errors
+Or start them separately:
 
-If you see JSON errors in production:
-1. Check Vercel logs for server-side errors
-2. Ensure all environment variables are set correctly in Vercel
-3. Verify that Redis is accessible from Vercel's environment 
+```bash
+# Start API server only
+pnpm run dev:server
+
+# Start frontend only (in another terminal)
+pnpm run dev
+```
+
+## API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/redis/check-connection` | GET | Verify Redis connectivity |
+| `/api/profile/get` | GET | Get baby profile data |
+| `/api/recommendations/get` | GET | Get feeding recommendations |
+| `/api/settings/get` | GET | Get user settings |
+| `/api/settings/save` | POST | Save user settings |
+| `/api/feedings/get` | GET | Get current feeding plan |
+| `/api/feedings/update` | POST | Update feeding completion status |
+| `/api/feedings/plan` | POST | Generate new feeding plan |
+
+## Troubleshooting Common Issues
+
+### "Profile fetch failed: Invalid JSON response from server"
+
+This error occurs when the profile API endpoint returns invalid JSON or an error response.
+
+#### Solution Steps:
+
+1. **Check Redis Connection**
+
+   Verify Redis is connected and has the necessary data:
+
+   ```bash
+   # Run the Redis initialization script to check connection and data
+   npx tsx src/scripts/init-all.ts
+   ```
+
+   If you see any errors, check your Redis URL in the `.env` file.
+
+2. **Verify API Server**
+
+   Make sure the API server is running:
+
+   ```bash
+   # Start the API server if it's not running
+   pnpm run dev:server
+   ```
+
+   Then test the connection in a browser or with curl:
+   
+   ```bash
+   curl http://localhost:3000/api/redis/check-connection
+   ```
+
+   You should see a response like: `{"connected":true,"message":"Successfully connected to Redis database"}`
+
+3. **Check for Profile Data**
+
+   Test the profile endpoint directly:
+
+   ```bash
+   curl http://localhost:3000/api/profile/get
+   ```
+
+   If this returns an error, the profile data may be missing. Reinitialize:
+
+   ```bash
+   npx tsx src/scripts/init-profile.ts
+   ```
+
+4. **Restart Both Servers**
+
+   Kill any existing server processes and restart:
+
+   ```bash
+   # Use the setup script
+   sh dev-setup.sh
+   ```
+
+5. **Check for Network Issues**
+
+   - Ensure your ports 3000 and 5173 are available
+   - Check firewall settings
+   - Make sure your IP is allowed by Upstash Redis
+
+### "Function Invocation Failed" Error in Vercel
+
+If you see this error in Vercel production:
+
+1. **Check Vercel Logs**
+   - Go to your Vercel dashboard
+   - Navigate to your project -> Deployments -> Latest
+   - View the Function Logs
+
+2. **Verify Environment Variables**
+   - Make sure `REDIS_URL` is set correctly in Vercel
+   - Confirm the `OPENAI_API_KEY` is valid
+
+3. **Redis Connection Issues**
+   - Make sure Vercel's IP range is allowed in Upstash Redis
+   - Check if you're exceeding Redis connection limits
+
+4. **Increase Function Memory/Timeout**
+   - In `vercel.json`, adjust the serverless function settings:
+   ```json
+   "functions": {
+     "api/index.js": {
+       "memory": 1024,
+       "maxDuration": 30
+     }
+   }
+   ```
+
+## Debugging API Responses
+
+If you're still having issues, add debugging output:
+
+1. In the browser console, add a Network breakpoint and examine the raw response
+
+2. Add this code to your fetch calls for debugging:
+   ```javascript
+   fetch("/api/profile/get")
+     .then(res => res.text())
+     .then(text => {
+       console.log("Raw response:", text);
+       try {
+         return JSON.parse(text);
+       } catch (e) {
+         console.error("JSON parse error:", e);
+         console.error("Raw text:", text);
+         throw new Error(`Invalid JSON: ${text.substring(0, 100)}...`);
+       }
+     })
+     .then(data => console.log("Parsed data:", data))
+     .catch(err => console.error("Fetch error:", err));
+   ```
+
+## Data Initialization
+
+The API requires four types of data in Redis:
+
+1. **Profile**: Baby's age and birth date
+2. **Recommendations**: Age-specific feeding guidelines
+3. **Settings**: User preferences for feeding schedules
+4. **Feedings**: Current feeding plan
+
+If any of these are missing, use the initialization scripts:
+
+```bash
+# Initialize all data at once
+npx tsx src/scripts/init-all.ts
+
+# Or initialize specific data:
+npx tsx src/scripts/init-profile.ts
+npx tsx src/scripts/init-recommendations.ts
+npx tsx src/scripts/init-settings.ts
+``` 

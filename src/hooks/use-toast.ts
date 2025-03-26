@@ -4,12 +4,19 @@
 import * as React from "react"
 
 import type {
-  ToastActionElement,
   ToastProps,
 } from "@radix-ui/react-toast"
 
+// Define the ToastActionElement type locally since it's not exported from '@radix-ui/react-toast'
+type ToastActionElement = React.ReactElement<{
+  altText: string;
+  onClick: () => void;
+}>
+
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// Default remove delay is quite short, let's increase it
+const TOAST_REMOVE_DELAY = 5000 // 5 seconds for normal toasts
+const ERROR_TOAST_REMOVE_DELAY = 10000 // 10 seconds for error toasts
 
 type ToasterToast = ToastProps & {
   id: string
@@ -17,6 +24,7 @@ type ToasterToast = ToastProps & {
   description?: string
   action?: ToastActionElement
   variant?: "default" | "destructive"
+  duration?: number // Add custom duration option
 }
 
 const actionTypes = {
@@ -60,10 +68,14 @@ interface State {
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
-const addToRemoveQueue = (toastId: string) => {
+const addToRemoveQueue = (toastId: string, duration?: number) => {
   if (toastTimeouts.has(toastId)) {
-    return
+    clearTimeout(toastTimeouts.get(toastId))
+    toastTimeouts.delete(toastId)
   }
+
+  // Use custom duration if provided, or default based on variant
+  const toastDuration = duration || TOAST_REMOVE_DELAY
 
   const timeout = setTimeout(() => {
     toastTimeouts.delete(toastId)
@@ -71,7 +83,7 @@ const addToRemoveQueue = (toastId: string) => {
       type: "REMOVE_TOAST",
       toastId: toastId,
     })
-  }, TOAST_REMOVE_DELAY)
+  }, toastDuration)
 
   toastTimeouts.set(toastId, timeout)
 }
@@ -96,10 +108,17 @@ export const reducer = (state: State, action: Action): State => {
       const { toastId } = action
 
       if (toastId) {
-        addToRemoveQueue(toastId)
+        const toast = state.toasts.find(t => t.id === toastId)
+        // Use custom duration or default based on variant
+        const duration = toast?.duration || 
+          (toast?.variant === "destructive" ? ERROR_TOAST_REMOVE_DELAY : TOAST_REMOVE_DELAY)
+        addToRemoveQueue(toastId, duration)
       } else {
         state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id)
+          // Use custom duration or default based on variant
+          const duration = toast.duration || 
+            (toast.variant === "destructive" ? ERROR_TOAST_REMOVE_DELAY : TOAST_REMOVE_DELAY)
+          addToRemoveQueue(toast.id, duration)
         })
       }
 
@@ -145,6 +164,10 @@ type Toast = Omit<ToasterToast, "id">
 function toast({ ...props }: Toast) {
   const id = genId()
 
+  // Determine duration based on variant
+  const duration = props.duration || 
+    (props.variant === "destructive" ? ERROR_TOAST_REMOVE_DELAY : TOAST_REMOVE_DELAY)
+
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
@@ -159,6 +182,7 @@ function toast({ ...props }: Toast) {
       ...props,
       id,
       open: true,
+      duration,
       onOpenChange: (open) => {
         if (!open) dismiss()
       },
@@ -170,6 +194,15 @@ function toast({ ...props }: Toast) {
     dismiss,
     update,
   }
+}
+
+// Convenience method for showing error toasts
+toast.error = (props: Omit<Toast, "variant">) => {
+  return toast({
+    ...props,
+    variant: "destructive",
+    duration: props.duration || ERROR_TOAST_REMOVE_DELAY,
+  })
 }
 
 function useToast() {

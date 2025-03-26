@@ -4,17 +4,38 @@ import { nanoid } from "nanoid"
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 
-// Key used to store feedings data in Redis
-const FEEDINGS_KEY = "baby:feedings"
+// Keys used to store feedings data in Redis
+const PLANNED_FEEDINGS_KEY = "baby:plannedFeedings"
+const ACTUAL_FEEDINGS_KEY = "baby:actualFeedings"
+
+// Types for our feeding data structures
+export interface PlannedFeeding {
+  id: string
+  time: string
+  amount: number
+  isLocked: boolean
+  isCompleted: boolean
+}
+
+export interface ActualFeeding {
+  id: string
+  date: string
+  time?: string
+  actualTime: string
+  planTime: string
+  amount?: number
+  Amount?: string
+  notes?: string
+}
 
 /**
- * Gets all feedings from Redis storage
- * @returns Array of feeding objects, or empty array if none found
+ * Gets all planned feedings from Redis storage
+ * @returns Array of planned feeding objects, or empty array if none found
  */
-export async function getFeedings() {
+export async function getPlannedFeedings() {
   try {
     const client = await getRedisClient()
-    const feedings = await client.get(FEEDINGS_KEY)
+    const feedings = await client.get(PLANNED_FEEDINGS_KEY)
 
     if (!feedings) {
       return []
@@ -22,30 +43,176 @@ export async function getFeedings() {
 
     return JSON.parse(feedings)
   } catch (error) {
-    console.error("Error getting feedings:", error)
+    console.error("Error getting planned feedings:", error)
     throw error
   }
 }
 
-export async function saveFeedings(feedings: any[]) {
+/**
+ * Gets all feedings from Redis storage (for backward compatibility)
+ * @returns Array of feeding objects, or empty array if none found
+ */
+export async function getFeedings() {
+  return getPlannedFeedings()
+}
+
+/**
+ * Gets all actual feedings from Redis storage
+ * @returns Array of actual feeding objects, or empty array if none found
+ */
+export async function getActualFeedings() {
   try {
     const client = await getRedisClient()
-    await client.set(FEEDINGS_KEY, JSON.stringify(feedings))
-    return true
+    const feedings = await client.get(ACTUAL_FEEDINGS_KEY)
+
+    if (!feedings) {
+      return []
+    }
+
+    return JSON.parse(feedings)
   } catch (error) {
-    console.error("Error saving feedings:", error)
+    console.error("Error getting actual feedings:", error)
     throw error
   }
 }
 
+/**
+ * Saves planned feedings to Redis
+ * @param feedings Array of planned feeding objects
+ * @returns true if successful
+ */
+export async function savePlannedFeedings(feedings: PlannedFeeding[]) {
+  try {
+    const client = await getRedisClient()
+    await client.set(PLANNED_FEEDINGS_KEY, JSON.stringify(feedings))
+    return true
+  } catch (error) {
+    console.error("Error saving planned feedings:", error)
+    throw error
+  }
+}
+
+/**
+ * Saves feedings to Redis (for backward compatibility)
+ * @param feedings Array of feeding objects
+ * @returns true if successful
+ */
+export async function saveFeedings(feedings: any[]) {
+  return savePlannedFeedings(feedings)
+}
+
+/**
+ * Saves actual feedings to Redis
+ * @param feedings Array of actual feeding objects
+ * @returns true if successful
+ */
+export async function saveActualFeedings(feedings: ActualFeeding[]) {
+  try {
+    const client = await getRedisClient()
+    await client.set(ACTUAL_FEEDINGS_KEY, JSON.stringify(feedings))
+    return true
+  } catch (error) {
+    console.error("Error saving actual feedings:", error)
+    throw error
+  }
+}
+
+/**
+ * Adds a new actual feeding record
+ * @param feeding The actual feeding data to add
+ * @returns The updated list of actual feedings
+ */
+export async function addActualFeeding(feeding: Omit<ActualFeeding, "id">) {
+  try {
+    const actualFeedings = await getActualFeedings()
+    
+    // Transform data if needed - handle both formats
+    const newFeeding: ActualFeeding = {
+      id: nanoid(),
+      ...feeding,
+      // If Amount is provided as string but amount isn't, try to parse
+      amount: feeding.amount || (feeding.Amount ? parseFloat(feeding.Amount.replace(/[^\d.-]/g, '')) : undefined),
+      // If time isn't provided but actualTime is, use that
+      time: feeding.time || feeding.actualTime
+    }
+    
+    const updatedFeedings = [...actualFeedings, newFeeding]
+    await saveActualFeedings(updatedFeedings)
+    
+    return updatedFeedings
+  } catch (error) {
+    console.error("Error adding actual feeding:", error)
+    throw error
+  }
+}
+
+/**
+ * Updates an existing actual feeding record
+ * @param id ID of the feeding to update
+ * @param updatedData Updated feeding data
+ * @returns The updated list of actual feedings
+ */
+export async function updateActualFeeding(id: string, updatedData: Partial<Omit<ActualFeeding, "id">>) {
+  try {
+    const actualFeedings = await getActualFeedings()
+    
+    // Transform data if needed
+    const processedData = { ...updatedData }
+    
+    // If Amount is provided as string but amount isn't, try to parse
+    if (processedData.Amount && !processedData.amount) {
+      processedData.amount = parseFloat(processedData.Amount.replace(/[^\d.-]/g, ''))
+    }
+    
+    // If time isn't provided but actualTime is, use that
+    if (processedData.actualTime && !processedData.time) {
+      processedData.time = processedData.actualTime
+    }
+    
+    const updatedFeedings = actualFeedings.map((feeding: ActualFeeding) => 
+      feeding.id === id ? { ...feeding, ...processedData } : feeding
+    )
+    
+    await saveActualFeedings(updatedFeedings)
+    return updatedFeedings
+  } catch (error) {
+    console.error("Error updating actual feeding:", error)
+    throw error
+  }
+}
+
+/**
+ * Removes an actual feeding record
+ * @param id ID of the feeding to remove
+ * @returns The updated list of actual feedings
+ */
+export async function removeActualFeeding(id: string) {
+  try {
+    const actualFeedings = await getActualFeedings()
+    const updatedFeedings = actualFeedings.filter((feeding: ActualFeeding) => feeding.id !== id)
+    
+    await saveActualFeedings(updatedFeedings)
+    return updatedFeedings
+  } catch (error) {
+    console.error("Error removing actual feeding:", error)
+    throw error
+  }
+}
+
+/**
+ * Updates a planned feeding completion status
+ * @param feedingId ID of the feeding to update
+ * @param isCompleted New completion status
+ * @returns true if successful
+ */
 export async function updateFeeding(feedingId: string, isCompleted: boolean) {
   try {
-    const feedings = await getFeedings()
-    const updatedFeedings = feedings.map((feeding: any) =>
+    const feedings = await getPlannedFeedings()
+    const updatedFeedings = feedings.map((feeding: PlannedFeeding) =>
       feeding.id === feedingId ? { ...feeding, isCompleted } : feeding,
     )
 
-    await saveFeedings(updatedFeedings)
+    await savePlannedFeedings(updatedFeedings)
     return true
   } catch (error) {
     console.error("Error updating feeding:", error)
