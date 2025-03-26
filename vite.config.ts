@@ -11,6 +11,7 @@ export default defineConfig({
     },
   },
   server: {
+    // Server proxy for development - Vercel serverless functions handle this in production
     proxy: {
       "/api": {
         target: "http://localhost:5000",
