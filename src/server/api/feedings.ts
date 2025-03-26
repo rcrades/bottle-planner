@@ -4,8 +4,13 @@ import { nanoid } from "nanoid"
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 
+// Key used to store feedings data in Redis
 const FEEDINGS_KEY = "baby:feedings"
 
+/**
+ * Gets all feedings from Redis storage
+ * @returns Array of feeding objects, or empty array if none found
+ */
 export async function getFeedings() {
   try {
     const client = await getRedisClient()
@@ -48,31 +53,60 @@ export async function updateFeeding(feedingId: string, isCompleted: boolean) {
   }
 }
 
+/**
+ * Plans the next 10 feedings using the OpenAI API or falls back to a rule-based approach
+ * @returns Array of feeding plan objects
+ */
 export async function planFeedings() {
   try {
     const settings = await getSettings()
     if (!settings) {
+      console.error("Settings not found, cannot plan feedings")
       throw new Error("Settings not found")
     }
 
     // Get current feedings to use as context
     const currentFeedings = await getFeedings()
+    console.log("Planning feedings with current settings:", JSON.stringify(settings, null, 2))
 
-    // Use AI SDK to generate the feeding plan
-    const { text } = await generateText({
-      model: openai("gpt-4o"),
-      prompt: generateFeedingPrompt(settings, currentFeedings),
-    })
+    try {
+      // Use AI SDK to generate the feeding plan
+      console.log("Generating feeding plan with AI...")
+      const prompt = generateFeedingPrompt(settings, currentFeedings)
+      console.log("Using prompt:", prompt)
+      
+      const { text } = await generateText({
+        model: openai("gpt-4o"),
+        prompt: prompt,
+        maxTokens: 1000,
+      })
+      
+      console.log("AI response received:", text.substring(0, 100) + "...")
 
-    // Parse the AI response
-    const feedingPlan = parseFeedingPlan(text, settings)
+      // Parse the AI response
+      const feedingPlan = parseFeedingPlan(text, settings)
+      console.log("Feeding plan parsed successfully:", feedingPlan.length, "feedings planned")
 
-    // Save the new feeding plan
-    await saveFeedings(feedingPlan)
+      // Save the new feeding plan
+      await saveFeedings(feedingPlan)
+      console.log("Feeding plan saved to Redis")
 
-    return feedingPlan
-  } catch (error) {
+      return feedingPlan
+    } catch (aiError: unknown) {
+      console.error("Error using AI to plan feedings:", aiError)
+      console.error("Error details:", aiError instanceof Error ? aiError.stack : "No stack trace available")
+      console.log("Falling back to rule-based approach...")
+      
+      // If AI generation fails, use the fallback plan
+      const fallbackPlan = generateFallbackPlan(settings)
+      console.log("Generated fallback plan with", fallbackPlan.length, "feedings")
+      await saveFeedings(fallbackPlan)
+      
+      return fallbackPlan
+    }
+  } catch (error: unknown) {
     console.error("Error planning feedings:", error)
+    console.error("Error details:", error instanceof Error ? error.stack : "No stack trace available")
     throw error
   }
 }

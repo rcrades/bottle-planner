@@ -2,13 +2,17 @@
 
 import { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
-import { Button } from "../components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { useToast } from "../hooks/use-toast"
 import { Settings, RefreshCw } from "lucide-react"
 import FeedingSchedule from "../components/feeding-schedule"
-import { Skeleton } from "../components/ui/skeleton"
+import RecommendationsTable from "../components/recommendations-table"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import type { FeedingRecommendation } from "../server/api/recommendations"
 
+// Interface defining the structure of feeding settings
 interface FeedingSettings {
   feedWindows: {
     min: number
@@ -38,14 +42,19 @@ interface FeedingPlan {
 export default function Dashboard() {
   const [settings, setSettings] = useState<FeedingSettings | null>(null)
   const [feedingPlan, setFeedingPlan] = useState<FeedingPlan[]>([])
+  const [recommendations, setRecommendations] = useState<FeedingRecommendation[]>([])
+  const [currentAgeInDays, setCurrentAgeInDays] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(false)
   const [isPlanningFeeds, setIsPlanningFeeds] = useState(false)
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
+  const [recommendationsError, setRecommendationsError] = useState<string>("")
   const { toast } = useToast()
 
   useEffect(() => {
-    // Load settings and current feeding plan
+    // Load settings, current feeding plan, and recommendations
     loadSettings()
     loadFeedingPlan()
+    loadRecommendations()
   }, [])
 
   const loadSettings = async () => {
@@ -87,6 +96,57 @@ export default function Dashboard() {
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const loadRecommendations = async () => {
+    setIsLoadingRecommendations(true)
+    setRecommendationsError("")
+    try {
+      // Log the start of each request
+      console.log("Fetching profile data...")
+      const profileResponse = await fetch("/api/profile/get")
+      const profileData = await profileResponse.json()
+      console.log("Profile response:", profileData)
+
+      console.log("Fetching recommendations data...")
+      const recommendationsResponse = await fetch("/api/recommendations/get")
+      const recommendationsData = await recommendationsResponse.json()
+      console.log("Recommendations response:", recommendationsData)
+
+      if (!profileData.success) {
+        throw new Error(`Profile fetch failed: ${profileData.error || 'No profile data'}`)
+      }
+
+      if (!recommendationsData.success) {
+        throw new Error(`Recommendations fetch failed: ${recommendationsData.error || 'No recommendations data'}`)
+      }
+
+      if (profileData.profile) {
+        setCurrentAgeInDays(profileData.profile.ageInDays)
+      } else {
+        throw new Error("Profile data missing age information")
+      }
+
+      if (recommendationsData.recommendations) {
+        setRecommendations(recommendationsData.recommendations)
+      } else {
+        throw new Error("Recommendations data is empty")
+      }
+    } catch (error) {
+      console.error("Failed to load recommendations:", error)
+      // More descriptive error message based on the error
+      const errorMessage = error instanceof Error 
+        ? error.message
+        : "Failed to load recommendations. Please check your connection and try again."
+      setRecommendationsError(errorMessage)
+      toast({
+        variant: "destructive",
+        title: "Failed to Load Recommendations",
+        description: errorMessage,
+      })
+    } finally {
+      setIsLoadingRecommendations(false)
     }
   }
 
@@ -164,51 +224,69 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Feeding Schedule</CardTitle>
-          <CardDescription>View and manage your baby's feeding schedule.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-4">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="flex items-center space-x-4">
-                  <Skeleton className="h-12 w-12 rounded-full" />
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-[250px]" />
-                    <Skeleton className="h-4 w-[200px]" />
-                  </div>
+      <Tabs defaultValue="schedule" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="schedule">Feeding Schedule</TabsTrigger>
+          <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="schedule">
+          <Card>
+            <CardHeader>
+              <CardTitle>Feeding Schedule</CardTitle>
+              <CardDescription>View and manage your baby's feeding schedule.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-4">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="flex items-center space-x-4">
+                      <Skeleton className="h-12 w-12 rounded-full" />
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-[250px]" />
+                        <Skeleton className="h-4 w-[200px]" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : feedingPlan.length > 0 ? (
-            <FeedingSchedule
-              feedings={feedingPlan}
-              useMetric={settings?.useMetric || false}
-              onToggleCompleted={toggleFeedingCompleted}
-            />
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground mb-4">
-                No feeding plan available. Generate a new plan to get started.
-              </p>
-              <Button onClick={planNextFeedings} disabled={isPlanningFeeds || !settings}>
+              ) : feedingPlan.length > 0 ? (
+                <FeedingSchedule
+                  feedings={feedingPlan}
+                  useMetric={settings?.useMetric || false}
+                  onToggleCompleted={toggleFeedingCompleted}
+                />
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">
+                    No feeding plan available. Generate a new plan to get started.
+                  </p>
+                  <Button onClick={planNextFeedings} disabled={isPlanningFeeds || !settings}>
+                    {isPlanningFeeds ? "Planning..." : "Plan Next 10 Feeds"}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {feedingPlan.length > 0 && (
+            <div className="flex justify-center mt-4">
+              <Button onClick={planNextFeedings} disabled={isPlanningFeeds} className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4" />
                 {isPlanningFeeds ? "Planning..." : "Plan Next 10 Feeds"}
               </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
 
-      {feedingPlan.length > 0 && (
-        <div className="flex justify-center">
-          <Button onClick={planNextFeedings} disabled={isPlanningFeeds} className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" />
-            {isPlanningFeeds ? "Planning..." : "Plan Next 10 Feeds"}
-          </Button>
-        </div>
-      )}
+        <TabsContent value="recommendations">
+          <RecommendationsTable
+            recommendations={recommendations}
+            currentAgeInDays={currentAgeInDays}
+            isLoading={isLoadingRecommendations}
+            error={recommendationsError}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

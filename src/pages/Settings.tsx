@@ -2,16 +2,17 @@
 
 import { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
-import { Button } from "../components/ui/button"
-import { Input } from "../components/ui/input"
-import { Label } from "../components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
-import { Switch } from "../components/ui/switch"
-import { TimeInput } from "../components/time-input"
-import { useToast } from "../hooks/use-toast"
-import { ChevronLeft } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Switch } from "@/components/ui/switch"
+import { useToast } from "@/hooks/use-toast"
+import { ChevronLeft, AlertTriangle } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
+// This interface defines the structure of our feeding settings
 interface FeedingSettings {
   feedWindows: {
     min: number
@@ -160,11 +161,19 @@ export default function Settings() {
         <h1 className="text-3xl font-bold">Feeding Settings</h1>
       </div>
 
+      <Alert variant="default" className="mb-6">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Settings Override Not Available</AlertTitle>
+        <AlertDescription>
+          The ability to override feeding settings is not yet available. The system is currently using pediatrician-recommended settings based on your baby's age.
+        </AlertDescription>
+      </Alert>
+
       <Tabs defaultValue="windows" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="windows">Feed Windows</TabsTrigger>
-          <TabsTrigger value="amounts">Feed Amounts</TabsTrigger>
-          <TabsTrigger value="schedule">Locked Feedings</TabsTrigger>
+          <TabsTrigger value="windows" disabled>Feed Windows</TabsTrigger>
+          <TabsTrigger value="amounts" disabled>Feed Amounts</TabsTrigger>
+          <TabsTrigger value="schedule" disabled>Locked Feedings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="windows">
@@ -184,15 +193,7 @@ export default function Settings() {
                     min="0.5"
                     max={settings.feedWindows.max}
                     value={settings.feedWindows.min}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedWindows: {
-                          ...settings.feedWindows,
-                          min: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">hours</p>
                 </div>
@@ -205,15 +206,7 @@ export default function Settings() {
                     min={settings.feedWindows.min}
                     max={settings.feedWindows.max}
                     value={settings.feedWindows.ideal}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedWindows: {
-                          ...settings.feedWindows,
-                          ideal: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">hours</p>
                 </div>
@@ -225,15 +218,7 @@ export default function Settings() {
                     step="0.25"
                     min={settings.feedWindows.min}
                     value={settings.feedWindows.max}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedWindows: {
-                          ...settings.feedWindows,
-                          max: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">hours</p>
                 </div>
@@ -253,12 +238,7 @@ export default function Settings() {
                 <Switch
                   id="use-metric"
                   checked={settings.useMetric}
-                  onCheckedChange={(checked) =>
-                    setSettings({
-                      ...settings,
-                      useMetric: checked,
-                    })
-                  }
+                  disabled
                 />
                 <Label htmlFor="use-metric">Use Metric (ml)</Label>
               </div>
@@ -273,15 +253,7 @@ export default function Settings() {
                     min="0.5"
                     max={settings.feedAmounts.max}
                     value={settings.feedAmounts.min}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedAmounts: {
-                          ...settings.feedAmounts,
-                          min: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">
                     {settings.useMetric
@@ -298,15 +270,7 @@ export default function Settings() {
                     min={settings.feedAmounts.min}
                     max={settings.feedAmounts.max}
                     value={settings.feedAmounts.target}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedAmounts: {
-                          ...settings.feedAmounts,
-                          target: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">
                     {settings.useMetric
@@ -322,15 +286,7 @@ export default function Settings() {
                     step="0.25"
                     min={settings.feedAmounts.min}
                     value={settings.feedAmounts.max}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        feedAmounts: {
-                          ...settings.feedAmounts,
-                          max: Number.parseFloat(e.target.value),
-                        },
-                      })
-                    }
+                    disabled
                   />
                   <p className="text-sm text-muted-foreground">
                     {settings.useMetric
@@ -356,15 +312,7 @@ export default function Settings() {
                 <Switch
                   id="enable-locked"
                   checked={settings.lockedFeedings.enabled}
-                  onCheckedChange={(checked) =>
-                    setSettings({
-                      ...settings,
-                      lockedFeedings: {
-                        ...settings.lockedFeedings,
-                        enabled: checked,
-                      },
-                    })
-                  }
+                  disabled
                 />
                 <Label htmlFor="enable-locked">Enable Locked Feedings</Label>
               </div>
@@ -373,14 +321,25 @@ export default function Settings() {
                 <div className="space-y-4">
                   {settings.lockedFeedings.times.map((time, index) => (
                     <div key={index} className="flex items-center space-x-2">
-                      <TimeInput value={time} onChange={(value) => handleTimeChange(index, value)} />
-                      <Button variant="outline" size="icon" onClick={() => removeLockedFeeding(index)}>
+                      <input 
+                        type="time"
+                        value={time}
+                        disabled
+                        className="border rounded p-2"
+                        aria-label="Select feeding time"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        disabled
+                        aria-label="Remove locked feeding time"
+                      >
                         <span className="sr-only">Remove</span>
                         <span>×</span>
                       </Button>
                     </div>
                   ))}
-                  <Button variant="outline" onClick={addLockedFeeding}>
+                  <Button variant="outline" disabled>
                     Add Locked Feeding
                   </Button>
                 </div>
@@ -391,8 +350,8 @@ export default function Settings() {
       </Tabs>
 
       <div className="mt-6 flex justify-end">
-        <Button onClick={handleSaveSettings} disabled={isLoading}>
-          {isLoading ? "Saving..." : "Save Settings"}
+        <Button disabled>
+          Settings Override Not Available
         </Button>
       </div>
     </div>

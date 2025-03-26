@@ -1,0 +1,70 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Project Rules for Bottle Planner
+
+## Documentation Organization
+
+### What Belongs in README.md
+- Project overview and purpose
+- Setup and installation instructions
+- List of installed components
+- Basic usage examples
+- Contribution guidelines
+- Links to external resources
+
+### What Belongs in This Rules File
+- Code organization standards
+- Import path conventions
+- Component installation procedures
+- Technical coding standards
+- Architecture guidelines
+- Implementation details for developers
+
+## Component Organization
+
+### Component Directory Structure
+- All components should be placed in the `src/components` directory
+- UI components from shadcn/ui should be in `src/components/ui`
+- Custom components should be in `src/components/[feature]` or directly in `src/components` if they're shared
+- Pages should be in `src/pages`
+
+### Component Import Rules
+- Always use the `@` alias for imports, which points to the project root
+- For components, use: `import { Component } from "@/components/ui/..."`
+- For pages, use: `import { Page } from "@/pages/..."`
+- For utils, use: `import { util } from "@/utils/..."`
+
+### shadcn/ui Component Installation
+- When installing new shadcn/ui components:
+  1. Use `pnpm dlx shadcn@latest add [component-name]`
+  2. After installation, move the component from `/components/ui` to `src/components/ui`
+  3. Update imports to use `@/components/ui/[component]`
+  4. Update the README.md with the new component
+
+### Example Component Structure
+```
+src/
+  components/
+    ui/              # shadcn/ui components
+      button.tsx
+      card.tsx
+      alert.tsx
+    feeding/         # feature-specific components
+      FeedingCard.tsx
+      FeedingList.tsx
+    shared/          # shared components
+      Layout.tsx
+      Header.tsx
+  pages/             # page components
+    Dashboard.tsx
+    Settings.tsx
+```
+
+## Package Management
+- Use pnpm as the package manager
+- Install dependencies with `pnpm add`
+- Install dev dependencies with `pnpm add -D`
+- Run scripts with `pnpm run [script]` 
