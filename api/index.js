@@ -23,15 +23,54 @@ const REDIS_KEYS = {
 };
 
 /**
+ * Adds detailed logging with timestamps
+ */
+function logWithTime(message, data = null) {
+  const timestamp = new Date().toISOString();
+  const logPrefix = `[${timestamp}]`;
+  
+  if (data) {
+    console.log(logPrefix, message, JSON.stringify(data));
+  } else {
+    console.log(logPrefix, message);
+  }
+}
+
+/**
+ * Logs detailed error information
+ */
+function logError(message, error) {
+  const timestamp = new Date().toISOString();
+  const logPrefix = `[${timestamp}] ERROR:`;
+  
+  console.error(logPrefix, message);
+  
+  if (error) {
+    console.error(`${logPrefix} Message:`, error.message || 'No message');
+    console.error(`${logPrefix} Stack:`, error.stack || 'No stack trace');
+    
+    if (error.code) {
+      console.error(`${logPrefix} Error code:`, error.code);
+    }
+    
+    if (error.cause) {
+      console.error(`${logPrefix} Cause:`, error.cause);
+    }
+  }
+}
+
+/**
  * Adds logging information for Vercel serverless environment
  */
 function logServerlessInfo() {
   // Add additional context for serverless debugging
   if (process.env.VERCEL) {
-    console.log('Running in Vercel serverless environment');
-    console.log(`Region: ${process.env.VERCEL_REGION || 'unknown'}`);
-    console.log(`Node version: ${process.version}`);
-    console.log(`Memory limit: ${process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || 'unknown'} MB`);
+    logWithTime('Running in Vercel serverless environment');
+    logWithTime(`Region: ${process.env.VERCEL_REGION || 'unknown'}`);
+    logWithTime(`Node version: ${process.version}`);
+    logWithTime(`Memory limit: ${process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || 'unknown'} MB`);
+    logWithTime(`Upstash Redis URL format: ${process.env.REDIS_URL ? process.env.REDIS_URL.substring(0, 10) + '...' : 'not set'}`);
+    logWithTime(`TLS enabled: ${process.env.REDIS_URL && process.env.REDIS_URL.startsWith('rediss://') ? 'yes' : 'no'}`);
   }
 }
 
@@ -238,6 +277,39 @@ const initDataIfNeeded = async () => {
 
 // Create and configure Express app
 const app = express();
+
+// Add request logging middleware before other middleware
+app.use((req, res, next) => {
+  const requestId = Math.random().toString(36).substring(2, 10);
+  req.requestId = requestId;
+  
+  const start = Date.now();
+  
+  // Log basic request details
+  logWithTime(`[${requestId}] ${req.method} ${req.url}`, {
+    ip: req.ip,
+    userAgent: req.get('User-Agent'),
+    vercel: !!process.env.VERCEL,
+    environment: process.env.NODE_ENV || 'development',
+  });
+  
+  // Create a function to log when the request completes
+  const logResponse = () => {
+    const duration = Date.now() - start;
+    logWithTime(`[${requestId}] Response: ${res.statusCode} ${res.statusMessage} (${duration}ms)`);
+  };
+  
+  // Log when the response finishes or closes
+  res.on('finish', logResponse);
+  res.on('close', () => {
+    if (!res.finished) {
+      logWithTime(`[${requestId}] Request aborted by client`);
+    }
+  });
+  
+  next();
+});
+
 app.use(cors({
   origin: '*', // In production, you might want to be more specific
   methods: ['GET', 'POST'],
@@ -245,6 +317,18 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Add error handling middleware
+app.use((err, req, res, next) => {
+  if (err) {
+    logError(`Request error for ${req.method} ${req.url}`, err);
+    return res.status(400).json({ 
+      error: 'Invalid request', 
+      message: err.message 
+    });
+  }
+  next();
+});
 
 // Log serverless information
 logServerlessInfo();
@@ -257,21 +341,28 @@ app.get("/api", (req, res) => {
     environment: process.env.NODE_ENV || "development",
     vercel: process.env.VERCEL ? "true" : "false",
     serverTime: new Date().toISOString(),
-    message: "Baby Bottle Planner API is running"
+    message: "Baby Bottle Planner API is running",
+    requestId: req.requestId
   });
 });
 
 // Home/health check endpoint - also respond immediately
 app.get("/", (req, res) => {
-  res.send("Bottle Planner API is running!");
+  res.json({
+    message: "Bottle Planner API is running!",
+    timestamp: new Date().toISOString(),
+    requestId: req.requestId,
+    vercel: !!process.env.VERCEL,
+    environment: process.env.NODE_ENV || 'development',
+  });
 });
 
 // Try to initialize data on startup only in development
 // Skip in production to avoid cold start delays
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   initDataIfNeeded().catch(err => {
-    console.error("⚠️ Warning: Data initialization error:", err);
-    console.log("API will continue, but some endpoints may fail if data is missing");
+    logError("Data initialization error", err);
+    logWithTime("API will continue, but some endpoints may fail if data is missing");
   });
 }
 
@@ -298,6 +389,95 @@ app.get("/api/redis/check-connection", async (req, res) => {
       message: error instanceof Error ? error.message : "Unknown error"
     });
   }
+});
+
+// Diagnostic endpoint to help troubleshoot production issues
+app.get("/api/diagnostics", async (req, res) => {
+  const diagnosticId = Math.random().toString(36).substring(2, 10);
+  logWithTime(`[${diagnosticId}] Gathering API diagnostics`);
+  
+  // Get Redis telemetry
+  const { getRedisTelemetry } = require('../src/server/api/redis-client');
+  const redisTelemetry = getRedisTelemetry();
+  
+  // Basic environment info
+  const environmentInfo = {
+    nodeEnv: process.env.NODE_ENV || 'unknown',
+    vercel: !!process.env.VERCEL,
+    vercelRegion: process.env.VERCEL_REGION || 'unknown',
+    nodeVersion: process.version,
+    memoryLimit: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || 'unknown',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    diagnosticId
+  };
+  
+  // Check Redis connectivity directly
+  let redisCheckResult = {
+    isConnected: false,
+    pingSuccess: false,
+    error: null,
+    connectionTime: null
+  };
+  
+  try {
+    // Test Redis connection and timing
+    logWithTime(`[${diagnosticId}] Testing Redis connection`);
+    const startTime = Date.now();
+    
+    try {
+      const client = await getRedisClient();
+      redisCheckResult.isConnected = true;
+      redisCheckResult.connectionTime = Date.now() - startTime;
+      
+      // Try a ping
+      const pingStart = Date.now();
+      await client.ping();
+      redisCheckResult.pingSuccess = true;
+      redisCheckResult.pingTime = Date.now() - pingStart;
+      
+      // Try to get keys to verify functionality
+      const keysStart = Date.now();
+      const keys = await client.keys('*');
+      redisCheckResult.keyCount = keys.length;
+      redisCheckResult.keysTime = Date.now() - keysStart;
+      redisCheckResult.foundKeys = keys.slice(0, 10); // Show first 10 keys
+      
+      logWithTime(`[${diagnosticId}] Redis checks completed successfully`);
+    } catch (redisError) {
+      logError(`[${diagnosticId}] Redis diagnostic check failed`, redisError);
+      redisCheckResult.error = {
+        message: redisError.message,
+        code: redisError.code,
+        stack: redisError.stack?.split('\n').slice(0, 3).join('\n')
+      };
+    }
+  } catch (outerError) {
+    logError(`[${diagnosticId}] Unexpected error in diagnostics`, outerError);
+    redisCheckResult.error = {
+      message: outerError.message,
+      stack: outerError.stack?.split('\n').slice(0, 3).join('\n')
+    };
+  }
+  
+  // Get memory usage
+  const memoryUsage = process.memoryUsage();
+  
+  // Assemble and return the diagnostic info
+  const diagnosticInfo = {
+    environmentInfo,
+    redisCheckResult,
+    redisTelemetry,
+    memoryUsage: {
+      rss: Math.round(memoryUsage.rss / 1024 / 1024) + ' MB',
+      heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + ' MB',
+      heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + ' MB',
+      external: Math.round(memoryUsage.external / 1024 / 1024) + ' MB'
+    }
+  };
+  
+  logWithTime(`[${diagnosticId}] Returning diagnostic info`);
+  res.json(diagnosticInfo);
 });
 
 // Redis data initialization endpoint
