@@ -279,3 +279,9 @@ export function getRedisTelemetry() {
   }
 }
 
+// At the end of the file, add CommonJS module.exports for compatibility
+module.exports = {
+  getRedisClient,
+  getRedisTelemetry,
+};
+

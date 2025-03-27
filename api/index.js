@@ -2,12 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 
-// Import Redis client with fixed configuration
-const { getRedisClient } = require('../src/server/api/redis-client');
-const { getSettings, saveSettings } = require('../src/server/api/settings');
-const { getAllRecommendations } = require('../src/server/api/recommendations');
-const { getProfile } = require('../src/server/api/profile');
-const { getFeedings, updateFeeding, planFeedings } = require('../src/server/api/feedings');
+// Import Redis client directly from the API directory
+const { getRedisClient } = require('./redis-client');
 
 /**
  * Redis keys used in the application
@@ -121,11 +117,20 @@ app.get("/api/diagnostics", async (req, res) => {
   }
 });
 
-// Recommendations endpoint
+// Recommendations endpoint - minimal implementation 
 app.get("/api/recommendations/get", async (req, res) => {
   try {
     log("Fetching recommendations");
-    const recommendations = await getAllRecommendations();
+    const client = await getRedisClient();
+    const recommendationsData = await client.get(REDIS_KEYS.RECOMMENDATIONS);
+    
+    if (!recommendationsData) {
+      // Return empty array if no data
+      res.json({ success: true, recommendations: [] });
+      return;
+    }
+    
+    const recommendations = JSON.parse(recommendationsData);
     res.json({ success: true, recommendations });
   } catch (error) {
     console.error("Error fetching recommendations:", error);
@@ -137,11 +142,24 @@ app.get("/api/recommendations/get", async (req, res) => {
   }
 });
 
-// Profile endpoint
+// Profile endpoint - minimal implementation
 app.get("/api/profile/get", async (req, res) => {
   try {
     log("Fetching profile");
-    const profile = await getProfile();
+    const client = await getRedisClient();
+    const profileData = await client.get(REDIS_KEYS.PROFILE);
+    
+    if (!profileData) {
+      // Return default profile if none exists
+      const defaultProfile = {
+        birthDate: "2025-03-20T00:00:00.000Z",
+        ageInDays: 7
+      };
+      res.json({ success: true, profile: defaultProfile });
+      return;
+    }
+    
+    const profile = JSON.parse(profileData);
     res.json({ success: true, profile });
   } catch (error) {
     console.error("Error fetching profile:", error);
@@ -153,10 +171,33 @@ app.get("/api/profile/get", async (req, res) => {
   }
 });
 
-// Settings endpoints
+// Settings endpoints - minimal implementation
 app.get("/api/settings/get", async (req, res) => {
   try {
-    const settings = await getSettings();
+    log("Fetching settings");
+    const client = await getRedisClient();
+    const settingsData = await client.get(REDIS_KEYS.SETTINGS);
+    
+    if (!settingsData) {
+      // Return default settings if none exists
+      const defaultSettings = {
+        feedWindows: {
+          min: 2,
+          max: 3,
+          ideal: 2.5,
+        },
+        feedAmounts: {
+          min: 1.5,
+          max: 2.5,
+          target: 2,
+        },
+        useMetric: false
+      };
+      res.json(defaultSettings);
+      return;
+    }
+    
+    const settings = JSON.parse(settingsData);
     res.json(settings);
   } catch (error) {
     console.error("Error getting settings:", error);
@@ -179,13 +220,92 @@ app.post("/api/settings/save", async (req, res) => {
       return;
     }
     
-    await saveSettings(settings);
+    const client = await getRedisClient();
+    await client.set(REDIS_KEYS.SETTINGS, JSON.stringify(settings));
+    
     res.json({ success: true });
   } catch (error) {
     console.error("Error saving settings:", error);
     res.status(500).json({ 
       success: false, 
       message: "Failed to save settings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Feedings endpoints - minimal implementation
+app.get("/api/feedings/get", async (req, res) => {
+  try {
+    log("Fetching feedings");
+    const client = await getRedisClient();
+    
+    // Get planned feedings
+    const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
+    const plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
+    
+    // Get actual feedings
+    const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    const actualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
+    
+    res.json({ 
+      success: true, 
+      feedings: {
+        planned: plannedFeedings,
+        actual: actualFeedings
+      } 
+    });
+  } catch (error) {
+    console.error("Error getting feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+app.post("/api/feedings/update", async (req, res) => {
+  try {
+    const { feedingId, isCompleted } = req.body;
+    
+    if (!feedingId) {
+      res.status(400).json({ success: false, message: "feedingId is required" });
+      return;
+    }
+    
+    if (isCompleted === undefined) {
+      res.status(400).json({ success: false, message: "isCompleted status is required" });
+      return;
+    }
+    
+    // Get existing planned feedings
+    const client = await getRedisClient();
+    const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
+    
+    if (!plannedFeedingsData) {
+      res.status(404).json({ success: false, message: "No planned feedings found" });
+      return;
+    }
+    
+    // Parse and update the feeding
+    const plannedFeedings = JSON.parse(plannedFeedingsData);
+    const updatedFeedings = plannedFeedings.map(feeding => {
+      if (feeding.id === feedingId) {
+        return { ...feeding, isCompleted };
+      }
+      return feeding;
+    });
+    
+    // Save updated feedings
+    await client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(updatedFeedings));
+    
+    res.json({ success: true, feedings: updatedFeedings });
+  } catch (error) {
+    console.error("Error updating feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update feeding",
       error: error instanceof Error ? error.message : "Unknown error"
     });
   }
