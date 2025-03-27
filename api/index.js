@@ -542,6 +542,204 @@ app.post("/api/feedings/plan", async (req, res) => {
   }
 });
 
+// Add backward compatibility for the original endpoints
+// This is needed because the frontend is still using these paths
+app.get("/api/feedings/get", async (req, res) => {
+  try {
+    log("Using legacy endpoint: /api/feedings/get");
+    const client = await getRedisClient();
+    
+    // Get planned feedings
+    const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
+    const plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
+    
+    // Get actual feedings
+    const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    const actualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
+    
+    // Return both in the expected format
+    res.json({ 
+      success: true, 
+      feedings: {
+        planned: plannedFeedings,
+        actual: actualFeedings
+      } 
+    });
+  } catch (error) {
+    console.error("Error getting feedings from legacy endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+app.get("/api/actual-feedings/get", async (req, res) => {
+  try {
+    log("Using legacy endpoint: /api/actual-feedings/get");
+    const client = await getRedisClient();
+    
+    // Get actual feedings
+    const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    const actualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
+    
+    res.json({ success: true, actualFeedings });
+  } catch (error) {
+    console.error("Error getting actual feedings from legacy endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get actual feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Backward compatibility for actual feeding management endpoints
+app.post("/api/actual-feedings/add", async (req, res) => {
+  try {
+    log("Using legacy endpoint: /api/actual-feedings/add");
+    const { time, date, amount, notes } = req.body;
+    
+    if (!time) {
+      res.status(400).json({ success: false, message: "time is required" });
+      return;
+    }
+    
+    if (!date) {
+      res.status(400).json({ success: false, message: "date is required" });
+      return;
+    }
+    
+    if (amount === undefined) {
+      res.status(400).json({ success: false, message: "amount is required" });
+      return;
+    }
+    
+    // Generate unique ID for new feeding
+    const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    let actualFeedings = actualFeedingsStr ? JSON.parse(actualFeedingsStr) : [];
+    
+    const newFeeding = {
+      id,
+      time,
+      date,
+      amount,
+      notes: notes || ""
+    };
+    
+    actualFeedings.push(newFeeding);
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(actualFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings,
+      message: "Actual feeding added successfully"
+    });
+  } catch (error) {
+    console.error("Error adding actual feeding from legacy endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+app.post("/api/actual-feedings/update", async (req, res) => {
+  try {
+    log("Using legacy endpoint: /api/actual-feedings/update");
+    const { id, time, date, amount, notes } = req.body;
+    
+    if (!id) {
+      res.status(400).json({ success: false, message: "id is required" });
+      return;
+    }
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    
+    if (!actualFeedingsStr) {
+      res.status(404).json({ success: false, message: "No actual feedings found" });
+      return;
+    }
+    
+    let actualFeedings = JSON.parse(actualFeedingsStr);
+    
+    // Find and update the feeding
+    const updatedFeedings = actualFeedings.map(feeding => {
+      if (feeding.id === id) {
+        return {
+          ...feeding,
+          ...(time !== undefined && { time }),
+          ...(date !== undefined && { date }),
+          ...(amount !== undefined && { amount }),
+          ...(notes !== undefined && { notes })
+        };
+      }
+      return feeding;
+    });
+    
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(updatedFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings: updatedFeedings,
+      message: "Actual feeding updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating actual feeding from legacy endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+app.post("/api/actual-feedings/remove", async (req, res) => {
+  try {
+    log("Using legacy endpoint: /api/actual-feedings/remove");
+    const { id } = req.body;
+    
+    if (!id) {
+      res.status(400).json({ success: false, message: "id is required" });
+      return;
+    }
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    
+    if (!actualFeedingsStr) {
+      res.status(404).json({ success: false, message: "No actual feedings found" });
+      return;
+    }
+    
+    let actualFeedings = JSON.parse(actualFeedingsStr);
+    
+    // Filter out the feeding to remove
+    const updatedFeedings = actualFeedings.filter(feeding => feeding.id !== id);
+    
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(updatedFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings: updatedFeedings,
+      message: "Actual feeding removed successfully"
+    });
+  } catch (error) {
+    console.error("Error removing actual feeding from legacy endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error:", err);
