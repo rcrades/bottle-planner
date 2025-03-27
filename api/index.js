@@ -244,7 +244,8 @@ app.get("/api/feedings/planned/get", async (req, res) => {
     const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
     const plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
     
-    res.json({ success: true, plannedFeedings });
+    // Return in the expected format for the UI
+    res.json({ success: true, feedings: { planned: plannedFeedings } });
   } catch (error) {
     console.error("Error getting planned feedings:", error);
     res.status(500).json({
@@ -264,7 +265,8 @@ app.get("/api/feedings/actual/get", async (req, res) => {
     const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
     const actualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
     
-    res.json({ success: true, actualFeedings });
+    // Return in the expected format for the UI
+    res.json({ success: true, feedings: { actual: actualFeedings } });
   } catch (error) {
     console.error("Error getting actual feedings:", error);
     res.status(500).json({
@@ -310,7 +312,8 @@ app.post("/api/feedings/update", async (req, res) => {
     // Save updated feedings
     await client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(updatedFeedings));
     
-    res.json({ success: true, feedings: updatedFeedings });
+    // Return in the expected format for the UI
+    res.json({ success: true, feedings: { planned: updatedFeedings } });
   } catch (error) {
     console.error("Error updating feeding:", error);
     res.status(500).json({
@@ -361,7 +364,7 @@ app.post("/api/feedings/actual/add", async (req, res) => {
     
     res.json({ 
       success: true, 
-      actualFeedings,
+      feedings: { actual: actualFeedings },
       message: "Actual feeding added successfully"
     });
   } catch (error) {
@@ -412,7 +415,7 @@ app.post("/api/feedings/actual/update", async (req, res) => {
     
     res.json({ 
       success: true, 
-      actualFeedings: updatedFeedings,
+      feedings: { actual: updatedFeedings },
       message: "Actual feeding updated successfully"
     });
   } catch (error) {
@@ -452,7 +455,7 @@ app.post("/api/feedings/actual/remove", async (req, res) => {
     
     res.json({ 
       success: true, 
-      actualFeedings: updatedFeedings,
+      feedings: { actual: updatedFeedings },
       message: "Actual feeding removed successfully"
     });
   } catch (error) {
@@ -526,7 +529,7 @@ app.post("/api/feedings/plan", async (req, res) => {
     
     res.json({ 
       success: true, 
-      plannedFeedings: feedingPlan,
+      feedings: { planned: feedingPlan },
       message: "New feeding plan generated successfully"
     });
   } catch (error) {
