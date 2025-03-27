@@ -73,9 +73,20 @@ pnpm run dev
 | `/api/recommendations/get` | GET | Get feeding recommendations |
 | `/api/settings/get` | GET | Get user settings |
 | `/api/settings/save` | POST | Save user settings |
-| `/api/feedings/get` | GET | Get current feeding plan |
-| `/api/feedings/update` | POST | Update feeding completion status |
+| `/api/feedings/planned/get` | GET | Get planned feedings |
+| `/api/feedings/actual/get` | GET | Get actual feedings |
 | `/api/feedings/plan` | POST | Generate new feeding plan |
+| `/api/feedings/recent` | GET | Get most recent feedings |
+| `/api/feedings/actual/add` | POST | Add an actual feeding |
+| `/api/feedings/actual/update` | POST | Update an actual feeding |
+| `/api/feedings/actual/remove` | POST | Remove an actual feeding |
+
+Legacy endpoints (for backward compatibility):
+| `/api/feedings/get` | GET | Get all feedings (planned and actual) |
+| `/api/actual-feedings/get` | GET | Get actual feedings |
+| `/api/actual-feedings/add` | POST | Add an actual feeding |
+| `/api/actual-feedings/update` | POST | Update an actual feeding |
+| `/api/actual-feedings/remove` | POST | Remove an actual feeding |
 
 ## Troubleshooting Common Issues
 

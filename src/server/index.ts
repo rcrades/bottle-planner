@@ -26,6 +26,8 @@ const NEWBORN_PROFILE_KEY = "baby:profile"
 const RECOMMENDATIONS_KEY = "baby:recommendations"
 const SETTINGS_KEY = "baby:settings"
 const FEEDINGS_KEY = "baby:feedings"
+const PLANNED_FEEDINGS_KEY = "baby:plannedFeedings"
+const COMPLETED_FEEDINGS_KEY = "baby:completedFeedings"
 
 // Create Express app
 const app = express()
@@ -472,6 +474,103 @@ const getProfileHandler: RequestHandler = async (req, res) => {
   }
 }
 
+// Complete feeding handler
+const completeFeedingHandler: RequestHandler = async (req, res) => {
+  try {
+    const { feedingId, actualAmount } = req.body;
+
+    if (!feedingId) {
+      res.status(400).json({ success: false, message: "feedingId is required" });
+      return;
+    }
+
+    if (actualAmount === undefined) {
+      res.status(400).json({ success: false, message: "actualAmount is required" });
+      return;
+    }
+
+    const client = await getRedisClient();
+    
+    // Get planned feedings
+    const plannedFeedingsData = await client.get(PLANNED_FEEDINGS_KEY);
+    let plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
+    
+    // Find the feeding to complete
+    const feedingToComplete = plannedFeedings.find((f: any) => f.id === feedingId);
+    if (!feedingToComplete) {
+      res.status(404).json({ success: false, message: "Feeding not found" });
+      return;
+    }
+
+    // Update the planned feeding's completion status
+    plannedFeedings = plannedFeedings.map((feeding: any) => {
+      if (feeding.id === feedingId) {
+        return { ...feeding, isCompleted: true };
+      }
+      return feeding;
+    });
+
+    // Create completed feeding record
+    const completedFeeding = {
+      ...feedingToComplete,
+      completedAt: new Date().toISOString(),
+      actualAmount,
+      plannedAmount: feedingToComplete.amount
+    };
+
+    // Get existing completed feedings
+    const completedFeedingsData = await client.get(COMPLETED_FEEDINGS_KEY);
+    const completedFeedings = completedFeedingsData ? JSON.parse(completedFeedingsData) : [];
+    
+    // Add new completed feeding
+    completedFeedings.push(completedFeeding);
+
+    // Save both updates
+    await Promise.all([
+      client.set(PLANNED_FEEDINGS_KEY, JSON.stringify(plannedFeedings)),
+      client.set(COMPLETED_FEEDINGS_KEY, JSON.stringify(completedFeedings))
+    ]);
+
+    res.json({ 
+      success: true, 
+      message: "Feeding marked as completed",
+      feedings: {
+        planned: plannedFeedings,
+        completed: completedFeedings
+      }
+    });
+  } catch (error) {
+    console.error("Error completing feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+};
+
+// Get completed feedings handler
+const getCompletedFeedingsHandler: RequestHandler = async (req, res) => {
+  try {
+    const client = await getRedisClient();
+    
+    const completedFeedingsData = await client.get(COMPLETED_FEEDINGS_KEY);
+    const completedFeedings = completedFeedingsData ? JSON.parse(completedFeedingsData) : [];
+    
+    res.json({ 
+      success: true, 
+      feedings: { completed: completedFeedings }
+    });
+  } catch (error) {
+    console.error("Error getting completed feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get completed feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+};
+
 // Register routes
 app.get("/api/redis/check-connection", checkRedisConnection)
 app.post("/api/redis/initialize-data", initializeRedisDataHandler)
@@ -482,6 +581,8 @@ app.get("/api/profile/get", getProfileHandler)
 app.get("/api/feedings/get", getFeedingsHandler)
 app.post("/api/feedings/update", updateFeedingHandler)
 app.post("/api/feedings/plan", planFeedingsHandler)
+app.post("/api/feedings/complete", completeFeedingHandler)
+app.get("/api/feedings/completed/get", getCompletedFeedingsHandler)
 
 // New actual feedings endpoints
 app.get("/api/actual-feedings/get", getActualFeedingsHandler)

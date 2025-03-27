@@ -1,4 +1,5 @@
 // Final fixed API handler for Vercel
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
@@ -13,7 +14,8 @@ const REDIS_KEYS = {
   RECOMMENDATIONS: "baby:recommendations",
   SETTINGS: "baby:settings",
   PLANNED_FEEDINGS: "baby:plannedFeedings",
-  ACTUAL_FEEDINGS: "baby:actualFeedings"
+  ACTUAL_FEEDINGS: "baby:actualFeedings",
+  COMPLETED_FEEDINGS: "baby:completedFeedings"
 };
 
 // Basic logging function
@@ -871,6 +873,105 @@ app.get("/api/feedings/recent", async (req, res) => {
   }
 });
 
+// Mark a planned feeding as completed
+app.post("/api/feedings/complete", async (req, res) => {
+  try {
+    log("Marking feeding as completed");
+    const { feedingId, actualAmount } = req.body;
+
+    if (!feedingId) {
+      res.status(400).json({ success: false, message: "feedingId is required" });
+      return;
+    }
+
+    if (actualAmount === undefined) {
+      res.status(400).json({ success: false, message: "actualAmount is required" });
+      return;
+    }
+
+    const client = await getRedisClient();
+    
+    // Get planned feedings
+    const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
+    let plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
+    
+    // Find the feeding to complete
+    const feedingToComplete = plannedFeedings.find(f => f.id === feedingId);
+    if (!feedingToComplete) {
+      res.status(404).json({ success: false, message: "Feeding not found" });
+      return;
+    }
+
+    // Update the planned feeding's completion status
+    plannedFeedings = plannedFeedings.map(feeding => {
+      if (feeding.id === feedingId) {
+        return { ...feeding, isCompleted: true };
+      }
+      return feeding;
+    });
+
+    // Create completed feeding record
+    const completedFeeding = {
+      ...feedingToComplete,
+      completedAt: new Date().toISOString(),
+      actualAmount,
+      plannedAmount: feedingToComplete.amount
+    };
+
+    // Get existing completed feedings
+    const completedFeedingsData = await client.get(REDIS_KEYS.COMPLETED_FEEDINGS);
+    const completedFeedings = completedFeedingsData ? JSON.parse(completedFeedingsData) : [];
+    
+    // Add new completed feeding
+    completedFeedings.push(completedFeeding);
+
+    // Save both updates
+    await Promise.all([
+      client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(plannedFeedings)),
+      client.set(REDIS_KEYS.COMPLETED_FEEDINGS, JSON.stringify(completedFeedings))
+    ]);
+
+    res.json({ 
+      success: true, 
+      message: "Feeding marked as completed",
+      feedings: {
+        planned: plannedFeedings,
+        completed: completedFeedings
+      }
+    });
+  } catch (error) {
+    console.error("Error completing feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Get completed feedings
+app.get("/api/feedings/completed/get", async (req, res) => {
+  try {
+    log("Getting completed feedings");
+    const client = await getRedisClient();
+    
+    const completedFeedingsData = await client.get(REDIS_KEYS.COMPLETED_FEEDINGS);
+    const completedFeedings = completedFeedingsData ? JSON.parse(completedFeedingsData) : [];
+    
+    res.json({ 
+      success: true, 
+      feedings: { completed: completedFeedings }
+    });
+  } catch (error) {
+    console.error("Error getting completed feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get completed feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error:", err);
@@ -879,6 +980,14 @@ app.use((err, req, res, next) => {
     message: err.message || "Unknown error"
   });
 });
+
+// Start the server if we're not in Vercel
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`API server listening on port ${port}`);
+  });
+}
 
 // Export the Express API
 module.exports = app; 

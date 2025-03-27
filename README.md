@@ -11,6 +11,21 @@ A simple web application to help parents track and plan baby bottle feedings bas
 - ✅ Mark feedings as completed
 - ⚙️ Customize settings for your baby's needs
 
+
+## Buildplan Next Steps
+
+- [ ] Add staging area for completed feedings in Redis (baby:completedFeedings)
+- [ ] Create mobile-friendly completion dialog with amount adjustment
+  - [ ] Pre-fill with planned amount
+  - [ ] Add +/- buttons to adjust by 0.1 oz
+  - [ ] Validate and save completed amount
+- [ ] Update UI to show "Recently Completed" status for completed feedings
+- [ ] Implement data push from plannedFeedings and completedFeedings
+  - [ ] Update isCompleted in plannedFeedings when marking complete
+  - [ ] Store completion details in completedFeedings
+- [ ] Add completion timestamp and actual amount to completed feeding records
+- [ ] Implement undo/revert capability for accidental completions
+
 ## Technology Stack
 
 - **Frontend**: React with Vite, TailwindCSS, Shadcn UI components
