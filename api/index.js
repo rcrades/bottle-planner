@@ -487,15 +487,28 @@ app.post("/api/feedings/plan", async (req, res) => {
     const feedingPlan = [];
     const { feedAmounts, lockedFeedings } = settings;
     
+    // Generate timestamp for this plan
+    const generatedAt = new Date().toISOString();
+    
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get timezone for planTime
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timeZoneAbbr = new Date().toLocaleTimeString('en-us',{timeZoneName:'short'}).split(' ')[2];
+    
     // Add locked feedings if enabled
     if (lockedFeedings && lockedFeedings.enabled && lockedFeedings.times) {
       lockedFeedings.times.forEach((time, index) => {
         feedingPlan.push({
-          id: `feed-${index + 1}`,
-          time,
+          id: `feedplan-${index + 1}`,
+          date: today,
+          planTime: `${time} ${timeZoneAbbr}`,
           amount: feedAmounts.target || 2,
+          amountUnit: "oz",
           isLocked: true,
-          isCompleted: false
+          isCompleted: false,
+          generatedAt
         });
       });
     } else {
@@ -508,19 +521,22 @@ app.post("/api/feedings/plan", async (req, res) => {
         const hourFormatted = hour.toString().padStart(2, '0');
         
         feedingPlan.push({
-          id: `feed-${i + 1}`,
-          time: `${hourFormatted}:00`,
+          id: `feedplan-${i + 1}`,
+          date: today,
+          planTime: `${hourFormatted}:00 ${timeZoneAbbr}`,
           amount: feedAmounts.target || 2,
+          amountUnit: "oz",
           isLocked: false,
-          isCompleted: false
+          isCompleted: false,
+          generatedAt
         });
       }
     }
     
     // Sort the feeding plan by time
     feedingPlan.sort((a, b) => {
-      const timeA = parseInt(a.time.replace(':', ''));
-      const timeB = parseInt(b.time.replace(':', ''));
+      const timeA = parseInt(a.planTime.split(' ')[0].replace(':', ''));
+      const timeB = parseInt(b.planTime.split(' ')[0].replace(':', ''));
       return timeA - timeB;
     });
     

@@ -15,6 +15,7 @@ import type { FeedingRecommendation } from "../server/api/recommendations"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ErrorNotification } from "@/components/error-notification"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import * as React from "react"
 
 // Interface defining the structure of feeding settings
 interface FeedingSettings {
@@ -38,10 +39,13 @@ interface FeedingSettings {
 // Type for planned feedings (renamed from FeedingPlan)
 interface PlannedFeeding {
   id: string
-  time: string
+  date: string
+  planTime: string
   amount: number
   isLocked: boolean
   isCompleted: boolean
+  amountUnit: string
+  generatedAt: string
 }
 
 // Interface for actual feedings is imported from the component
@@ -107,8 +111,11 @@ export default function Dashboard() {
       const response = await fetch("/api/feedings/get")
       const data = await response.json()
 
-      if (data.feedings) {
-        setPlannedFeedings(data.feedings)
+      if (data.success && data.feedings && data.feedings.planned) {
+        setPlannedFeedings(data.feedings.planned)
+      } else {
+        console.warn("No planned feedings found in response:", data)
+        setPlannedFeedings([])
       }
     } catch (error) {
       console.error("Failed to load planned feedings:", error)
@@ -117,6 +124,7 @@ export default function Dashboard() {
         title: "Failed to Load Feeding Plan",
         description: "Please check your connection and try again.",
       })
+      setPlannedFeedings([])
     } finally {
       setIsLoading(false)
     }
@@ -534,10 +542,28 @@ export default function Dashboard() {
       const data = await response.json()
 
       if (data.success && data.feedings) {
-        setPlannedFeedings(data.feedings)
+        setPlannedFeedings(data.feedings.planned)
+        
+        // Create a summary of the planned feedings
+        const feedingSummary = data.feedings.planned
+          .map((feeding: PlannedFeeding) => `${feeding.planTime} - ${feeding.amount}${feeding.amountUnit}`)
+          .join('\n');
+        
+        // Show detailed toast with feeding plan
         toast({
-          title: "Feeding Plan Generated",
-          description: "Your next 10 feedings have been planned.",
+          title: "New Feeding Plan Generated",
+          description: (
+            <div className="mt-2 space-y-1">
+              <p>Your next feedings are scheduled for:</p>
+              <pre className="mt-2 p-2 bg-secondary rounded-md text-sm">
+                {feedingSummary}
+              </pre>
+              <p className="text-xs text-muted-foreground mt-2">
+                Plan generated at: {new Date(data.feedings.planned[0].generatedAt).toLocaleString()}
+              </p>
+            </div>
+          ),
+          duration: 5000,
         })
       } else {
         throw new Error(data.message || "Failed to plan feedings")

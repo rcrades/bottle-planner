@@ -21,7 +21,7 @@ const ERROR_TOAST_REMOVE_DELAY = 10000 // 10 seconds for error toasts
 type ToasterToast = ToastProps & {
   id: string
   title?: string
-  description?: string
+  description?: React.ReactNode
   action?: ToastActionElement
   variant?: "default" | "destructive"
   duration?: number // Add custom duration option

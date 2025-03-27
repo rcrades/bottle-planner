@@ -13,8 +13,10 @@ export interface PlannedFeeding {
   id: string
   time: string
   amount: number
+  amountUnit: string
   isLocked: boolean
   isCompleted: boolean
+  generatedAt: string
 }
 
 export interface ActualFeeding {
