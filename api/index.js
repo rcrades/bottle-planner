@@ -740,6 +740,121 @@ app.post("/api/actual-feedings/remove", async (req, res) => {
   }
 });
 
+// Get recent feedings for preview (most recent 3)
+app.get("/api/feedings/recent", async (req, res) => {
+  try {
+    // Get limit parameter from query, default to 3
+    const limit = parseInt(req.query.limit) || 3;
+    
+    log(`Fetching ${limit} recent feedings for preview`);
+    const client = await getRedisClient();
+    
+    // Get actual feedings
+    const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    const allActualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
+    
+    // Sort by date and time (most recent first)
+    const sortedFeedings = allActualFeedings.sort((a, b) => {
+      // Create date objects based on the available fields
+      let dateA, dateB;
+      
+      try {
+        // Handle different time formats that might be in the data
+        if (a.date) {
+          // Try to parse with actualTime or time
+          const timeA = a.actualTime || a.time || "00:00";
+          // Remove any timezone info from time string if present
+          const cleanTimeA = timeA.replace(/ [A-Z]{3}$/, "");
+          dateA = new Date(a.date + "T" + cleanTimeA);
+        } else {
+          // Fallback to current date
+          dateA = new Date();
+        }
+        
+        if (b.date) {
+          // Try to parse with actualTime or time
+          const timeB = b.actualTime || b.time || "00:00";
+          // Remove any timezone info from time string if present
+          const cleanTimeB = timeB.replace(/ [A-Z]{3}$/, "");
+          dateB = new Date(b.date + "T" + cleanTimeB);
+        } else {
+          // Fallback to current date
+          dateB = new Date();
+        }
+      } catch (e) {
+        // If date parsing fails, use timestamps or current time
+        dateA = a.timestamp ? new Date(a.timestamp) : new Date();
+        dateB = b.timestamp ? new Date(b.timestamp) : new Date();
+      }
+      
+      // Sort newer dates first
+      return dateB - dateA;
+    });
+    
+    // Get the most recent feedings based on the limit
+    const recentFeedings = sortedFeedings.slice(0, limit);
+    
+    // Enhance with display-ready information
+    const enhancedRecentFeedings = recentFeedings.map(feeding => {
+      // Calculate time ago for display
+      let timeAgo = "";
+      try {
+        const feedingTime = new Date(feeding.date + "T" + (feeding.actualTime || feeding.time || "00:00").replace(/ [A-Z]{3}$/, ""));
+        const now = new Date();
+        const diffMs = now - feedingTime;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+        
+        if (diffDays > 0) {
+          timeAgo = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+        } else if (diffHours > 0) {
+          timeAgo = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        } else if (diffMins > 0) {
+          timeAgo = `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+        } else {
+          timeAgo = 'Just now';
+        }
+      } catch (e) {
+        timeAgo = "Recently";
+      }
+      
+      // Format the amount with units
+      let formattedAmount = "";
+      if (feeding.amount || feeding.Amount) {
+        const amount = feeding.amount || feeding.Amount;
+        // Check if amount already has units
+        if (typeof amount === 'string' && (amount.includes('oz') || amount.includes('ml'))) {
+          formattedAmount = amount;
+        } else {
+          // Add default unit (oz)
+          formattedAmount = `${amount} oz`;
+        }
+      }
+      
+      return {
+        ...feeding,
+        displayTime: feeding.actualTime || feeding.time || "",
+        displayDate: feeding.date || "",
+        displayAmount: formattedAmount,
+        timeAgo
+      };
+    });
+    
+    res.json({ 
+      success: true, 
+      recentFeedings: enhancedRecentFeedings 
+    });
+  } catch (error) {
+    console.error("Error getting recent feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get recent feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error:", err);
