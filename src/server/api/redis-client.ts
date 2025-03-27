@@ -28,14 +28,9 @@ function logError(message: string, error: any) {
   
   if (error) {
     console.error(`${logPrefix} Message:`, error.message || 'No message')
-    console.error(`${logPrefix} Stack:`, error.stack || 'No stack trace')
     
     if (error.code) {
       console.error(`${logPrefix} Error code:`, error.code)
-    }
-    
-    if (error.cause) {
-      console.error(`${logPrefix} Cause:`, error.cause)
     }
   }
 }
@@ -46,8 +41,8 @@ let connectionError: Error | null = null
 
 // Connection status tracking
 let connectionAttempts = 0
-const MAX_CONNECTION_ATTEMPTS = 3  // Reduced for faster fallbacks in production
-const CONNECTION_TIMEOUT_MS = 3000 // Reduced to 3 seconds for faster response
+const MAX_CONNECTION_ATTEMPTS = 3
+const CONNECTION_TIMEOUT_MS = 5000 // Increased to 5 seconds for more reliability
 
 // Telemetry data for diagnosing issues
 const connectionTelemetry = {
@@ -122,61 +117,18 @@ export async function getRedisClient() {
     })
     
     // Ensure we use TLS for production and Upstash
-    // Force TLS in production, regardless of URL
     const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL
-    const isUpstash = redisUrl.includes("upstash.io")
-    const forceTLS = isProd || isUpstash
-
-    // Create a URL with forced TLS if needed, but preserving original credentials
-    let connectionUrl = redisUrl
-    if (forceTLS && redisUrl.startsWith('redis://')) {
-      connectionUrl = redisUrl.replace('redis://', 'rediss://')
-      logWithTime("Forced TLS connection for production/Upstash", {
-        originalPrefix: redisUrl.substring(0, 10),
-        newPrefix: connectionUrl.substring(0, 10),
-      })
-    }
     
-    // Create Redis client with optimized settings for serverless
+    // Simple Redis client with minimal configuration - matches our successful test
     const clientConfig: any = {
-      url: connectionUrl,
+      url: redisUrl,
       socket: {
-        tls: forceTLS,
-        reconnectStrategy: (retries: number) => {
-          // Very limited reconnections for serverless
-          if (retries > 1) {
-            logWithTime("Maximum Redis reconnection attempts reached")
-            return new Error("Maximum reconnection attempts reached")
-          }
-          
-          // Minimal backoff for serverless
-          const delay = 300
-          logWithTime(`Redis reconnect attempt ${retries}, delay: ${delay}ms`)
-          return delay
-        },
+        tls: redisUrl.startsWith('rediss://') || isProd,
         connectTimeout: CONNECTION_TIMEOUT_MS,
-      },
-      // Critical settings for serverless
-      disableOfflineQueue: false, // Allow commands to be queued
-      readonly: false,
-    }
-    
-    // For Upstash in production environments, add special configurations
-    if (isUpstash && isProd) {
-      try {
-        clientConfig.password = connectionUrl.split('@')[0].split(':').pop()
-        clientConfig.socket.keepAlive = false // Disable for serverless
-        logWithTime("Using optimized Upstash production configurations", {
-          hasPassword: !!clientConfig.password,
-          keepAlive: clientConfig.socket.keepAlive,
-        })
-      } catch (credentialError) {
-        logError("Error parsing Upstash credentials", credentialError)
-        // Continue anyway with default URL
       }
     }
     
-    // Create the client
+    // Create the client with simplified config
     redisClient = createClient(clientConfig)
     
     // Add event handlers
@@ -202,85 +154,15 @@ export async function getRedisClient() {
       connectionTelemetry.successfulConnections++
     })
     
-    redisClient.on("reconnecting", () => {
-      logWithTime("Redis client reconnecting event fired")
-    })
-    
-    redisClient.on("end", () => {
-      logWithTime("Redis client connection ended")
-    })
-    
-    // Connect with timeout - extremely short for serverless
-    logWithTime("Attempting Redis connection with timeout", {
-      timeout: CONNECTION_TIMEOUT_MS
-    })
-    
-    const connectionPromise = redisClient.connect()
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        const err = new Error(`Redis connection timed out after ${CONNECTION_TIMEOUT_MS}ms`)
-        connectionTelemetry.errors.push({
-          time: new Date(), 
-          message: err.message,
-          code: 'ETIMEOUT'
-        })
-        reject(err)
-      }, CONNECTION_TIMEOUT_MS)
-    })
-    
-    await Promise.race([connectionPromise, timeoutPromise])
+    // Connect - simple with no extra timeout race
+    await redisClient.connect()
     logWithTime("Redis client connected successfully")
     
-    // Simple ping without extra timeout in production
-    logWithTime("Verifying Redis connection with PING")
+    // Verify connection with PING
+    await redisClient.ping()
+    logWithTime("Redis connection verified with PING")
+    connectionTelemetry.lastSuccessfulOperation = new Date()
     
-    if (isProd) {
-      try {
-        await redisClient.ping()
-        logWithTime("Redis connection verified with PING (production mode)")
-        connectionTelemetry.lastSuccessfulOperation = new Date()
-      } catch (pingError) {
-        logError("Production Redis PING failed", pingError)
-        connectionTelemetry.lastError = pingError as Error
-        connectionTelemetry.errors.push({
-          time: new Date(), 
-          message: (pingError as Error).message,
-          code: (pingError as any).code
-        })
-        throw pingError
-      }
-    } else {
-      // More careful verification in development
-      try {
-        const pingPromise = redisClient.ping()
-        const pingTimeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => {
-            const err = new Error(`Redis ping timed out after 2000ms`)
-            connectionTelemetry.errors.push({
-              time: new Date(), 
-              message: err.message,
-              code: 'ETIMEOUT'
-            })
-            reject(err)
-          }, 2000)
-        })
-        await Promise.race([pingPromise, pingTimeoutPromise])
-        logWithTime("Redis connection verified with PING (development mode)")
-        connectionTelemetry.lastSuccessfulOperation = new Date()
-      } catch (pingError) {
-        logError("Development Redis PING failed", pingError)
-        connectionTelemetry.lastError = pingError as Error
-        connectionTelemetry.errors.push({
-          time: new Date(), 
-          message: (pingError as Error).message,
-          code: (pingError as any).code
-        })
-        throw pingError
-      }
-    }
-    
-    logWithTime("Redis client ready for operations")
-    connectionTelemetry.failedConnections = 0 // Reset failed connections on success
     return redisClient
   } catch (error: any) {
     connectionError = error
