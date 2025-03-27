@@ -234,32 +234,42 @@ app.post("/api/settings/save", async (req, res) => {
   }
 });
 
-// Feedings endpoints - minimal implementation
-app.get("/api/feedings/get", async (req, res) => {
+// Replace the generic feedings endpoint with separate endpoints
+app.get("/api/feedings/planned/get", async (req, res) => {
   try {
-    log("Fetching feedings");
+    log("Fetching planned feedings");
     const client = await getRedisClient();
     
     // Get planned feedings
     const plannedFeedingsData = await client.get(REDIS_KEYS.PLANNED_FEEDINGS);
     const plannedFeedings = plannedFeedingsData ? JSON.parse(plannedFeedingsData) : [];
     
+    res.json({ success: true, plannedFeedings });
+  } catch (error) {
+    console.error("Error getting planned feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get planned feedings",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+app.get("/api/feedings/actual/get", async (req, res) => {
+  try {
+    log("Fetching actual feedings");
+    const client = await getRedisClient();
+    
     // Get actual feedings
     const actualFeedingsData = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
     const actualFeedings = actualFeedingsData ? JSON.parse(actualFeedingsData) : [];
     
-    res.json({ 
-      success: true, 
-      feedings: {
-        planned: plannedFeedings,
-        actual: actualFeedings
-      } 
-    });
+    res.json({ success: true, actualFeedings });
   } catch (error) {
-    console.error("Error getting feedings:", error);
+    console.error("Error getting actual feedings:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get feedings",
+      message: "Failed to get actual feedings",
       error: error instanceof Error ? error.message : "Unknown error"
     });
   }
@@ -306,6 +316,224 @@ app.post("/api/feedings/update", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Add actual feeding endpoint
+app.post("/api/feedings/actual/add", async (req, res) => {
+  try {
+    const { time, date, amount, notes } = req.body;
+    
+    if (!time) {
+      res.status(400).json({ success: false, message: "time is required" });
+      return;
+    }
+    
+    if (!date) {
+      res.status(400).json({ success: false, message: "date is required" });
+      return;
+    }
+    
+    if (amount === undefined) {
+      res.status(400).json({ success: false, message: "amount is required" });
+      return;
+    }
+    
+    // Generate unique ID for new feeding
+    const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    let actualFeedings = actualFeedingsStr ? JSON.parse(actualFeedingsStr) : [];
+    
+    const newFeeding = {
+      id,
+      time,
+      date,
+      amount,
+      notes: notes || ""
+    };
+    
+    actualFeedings.push(newFeeding);
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(actualFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings,
+      message: "Actual feeding added successfully"
+    });
+  } catch (error) {
+    console.error("Error adding actual feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Update actual feeding endpoint
+app.post("/api/feedings/actual/update", async (req, res) => {
+  try {
+    const { id, time, date, amount, notes } = req.body;
+    
+    if (!id) {
+      res.status(400).json({ success: false, message: "id is required" });
+      return;
+    }
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    
+    if (!actualFeedingsStr) {
+      res.status(404).json({ success: false, message: "No actual feedings found" });
+      return;
+    }
+    
+    let actualFeedings = JSON.parse(actualFeedingsStr);
+    
+    // Find and update the feeding
+    const updatedFeedings = actualFeedings.map(feeding => {
+      if (feeding.id === id) {
+        return {
+          ...feeding,
+          ...(time !== undefined && { time }),
+          ...(date !== undefined && { date }),
+          ...(amount !== undefined && { amount }),
+          ...(notes !== undefined && { notes })
+        };
+      }
+      return feeding;
+    });
+    
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(updatedFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings: updatedFeedings,
+      message: "Actual feeding updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating actual feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Remove actual feeding endpoint
+app.post("/api/feedings/actual/remove", async (req, res) => {
+  try {
+    const { id } = req.body;
+    
+    if (!id) {
+      res.status(400).json({ success: false, message: "id is required" });
+      return;
+    }
+    
+    const client = await getRedisClient();
+    const actualFeedingsStr = await client.get(REDIS_KEYS.ACTUAL_FEEDINGS);
+    
+    if (!actualFeedingsStr) {
+      res.status(404).json({ success: false, message: "No actual feedings found" });
+      return;
+    }
+    
+    let actualFeedings = JSON.parse(actualFeedingsStr);
+    
+    // Filter out the feeding to remove
+    const updatedFeedings = actualFeedings.filter(feeding => feeding.id !== id);
+    
+    await client.set(REDIS_KEYS.ACTUAL_FEEDINGS, JSON.stringify(updatedFeedings));
+    
+    res.json({ 
+      success: true, 
+      actualFeedings: updatedFeedings,
+      message: "Actual feeding removed successfully"
+    });
+  } catch (error) {
+    console.error("Error removing actual feeding:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove actual feeding",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Plan feedings endpoint
+app.post("/api/feedings/plan", async (req, res) => {
+  try {
+    log("Planning new feeding schedule");
+    const client = await getRedisClient();
+    
+    // Get settings to use for planning
+    const settingsData = await client.get(REDIS_KEYS.SETTINGS);
+    const settings = settingsData ? JSON.parse(settingsData) : {
+      feedWindows: { min: 2, max: 3, ideal: 2.5 },
+      feedAmounts: { min: 1.5, max: 2.5, target: 2 },
+      useMetric: false,
+      lockedFeedings: { enabled: true, times: ["08:00", "12:00", "16:00", "20:00"] }
+    };
+    
+    // Create a basic feeding plan based on settings
+    const feedingPlan = [];
+    const { feedAmounts, lockedFeedings } = settings;
+    
+    // Add locked feedings if enabled
+    if (lockedFeedings && lockedFeedings.enabled && lockedFeedings.times) {
+      lockedFeedings.times.forEach((time, index) => {
+        feedingPlan.push({
+          id: `feed-${index + 1}`,
+          time,
+          amount: feedAmounts.target || 2,
+          isLocked: true,
+          isCompleted: false
+        });
+      });
+    } else {
+      // If no locked feedings, create a default 8 feeding schedule
+      const startHour = 6; // Start at 6 AM
+      const feedingInterval = 3; // Every 3 hours
+      
+      for (let i = 0; i < 8; i++) {
+        const hour = (startHour + (i * feedingInterval)) % 24;
+        const hourFormatted = hour.toString().padStart(2, '0');
+        
+        feedingPlan.push({
+          id: `feed-${i + 1}`,
+          time: `${hourFormatted}:00`,
+          amount: feedAmounts.target || 2,
+          isLocked: false,
+          isCompleted: false
+        });
+      }
+    }
+    
+    // Sort the feeding plan by time
+    feedingPlan.sort((a, b) => {
+      const timeA = parseInt(a.time.replace(':', ''));
+      const timeB = parseInt(b.time.replace(':', ''));
+      return timeA - timeB;
+    });
+    
+    // Save the new plan
+    await client.set(REDIS_KEYS.PLANNED_FEEDINGS, JSON.stringify(feedingPlan));
+    
+    res.json({ 
+      success: true, 
+      plannedFeedings: feedingPlan,
+      message: "New feeding plan generated successfully"
+    });
+  } catch (error) {
+    console.error("Error planning feedings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to plan feedings",
       error: error instanceof Error ? error.message : "Unknown error"
     });
   }
